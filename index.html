@@ -1,0 +1,655 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0f1115">
+<title>蔵書スキャナ</title>
+<style>
+  /* ===== 基本 ===== */
+  :root{
+    --bg:#0f1115; --panel:#1a1e26; --line:#2c3340;
+    --fg:#e8ecf2; --sub:#97a1b0;
+    --ok:#3ddc84; --ng:#ff6b6b; --warn:#ffc042; --accent:#4c8dff;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+
+  /* ===== ヘッダ ===== */
+  header{
+    flex:0 0 auto; display:flex; align-items:center; gap:8px;
+    padding:calc(env(safe-area-inset-top,0px) + 8px) 12px 8px;
+    background:var(--panel); border-bottom:1px solid var(--line);
+  }
+  header h1{font-size:15px; margin:0; font-weight:600; letter-spacing:.02em}
+  header .phase{font-size:11px; color:var(--sub)}
+  header .count{margin-left:auto; font-size:13px; color:var(--sub)}
+  header .count b{color:var(--fg); font-size:17px}
+
+  /* ===== カメラ表示エリア ===== */
+  #stage{flex:1 1 auto; position:relative; background:#000; overflow:hidden}
+  #video{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; background:#000}
+
+  /* 読取枠。この枠の中だけをデコードに掛ける（見たままが読取対象） */
+  #reticle{
+    position:absolute; border:2px solid rgba(255,255,255,.85); border-radius:10px;
+    box-shadow:0 0 0 4000px rgba(0,0,0,.38); pointer-events:none;
+    transition:border-color .15s;
+  }
+  #reticle.hit{border-color:var(--ok)}
+  #reticle.dup{border-color:var(--warn)}
+
+  #hint{
+    position:absolute; left:0; right:0; bottom:10px; text-align:center;
+    font-size:12px; color:#cfd6e0; text-shadow:0 1px 3px #000; pointer-events:none;
+  }
+
+  /* トースト（読取結果を画面上部に出す） */
+  #toast{
+    position:absolute; top:10px; left:10px; right:10px;
+    padding:10px 12px; border-radius:10px; background:rgba(20,24,32,.92);
+    border:1px solid var(--line); font-size:14px; line-height:1.4;
+    opacity:0; transform:translateY(-8px); transition:opacity .18s, transform .18s;
+    pointer-events:none;
+  }
+  #toast.show{opacity:1; transform:none}
+  #toast.ok{border-color:var(--ok)}
+  #toast.dup{border-color:var(--warn)}
+  #toast .isbn{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:18px; letter-spacing:.04em}
+  #toast .tag{font-size:11px; color:var(--sub)}
+
+  /* 起動前オーバーレイ */
+  #startPanel{
+    position:absolute; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:16px; padding:24px;
+    background:#0f1115; text-align:center;
+  }
+  #startPanel p{margin:0; color:var(--sub); font-size:13px; max-width:22em}
+  #startBtn{
+    width:180px; height:180px; border-radius:50%; border:none;
+    background:var(--accent); color:#fff; font-size:19px; font-weight:700;
+    box-shadow:0 8px 30px rgba(76,141,255,.35);
+  }
+  #startBtn:active{transform:scale(.97)}
+  #startBtn[disabled]{background:#39414f; box-shadow:none}
+
+  /* ===== エラー表示（握り潰さず必ず出す） ===== */
+  #errorBox{
+    flex:0 0 auto; display:none; padding:10px 12px; background:#3a1c1c;
+    border-top:1px solid #6b2b2b; color:#ffd9d9; font-size:13px; white-space:pre-wrap;
+  }
+  #errorBox.show{display:block}
+  #errorBox b{color:#ff9a9a}
+
+  /* ===== 下部コントロール（親指で届く位置） ===== */
+  footer{
+    flex:0 0 auto; display:flex; gap:8px; padding:10px 12px calc(10px + var(--safe-b));
+    background:var(--panel); border-top:1px solid var(--line);
+  }
+  button.ctl{
+    flex:1; min-height:52px; border-radius:12px; border:1px solid var(--line);
+    background:#232a35; color:var(--fg); font-size:15px; font-weight:600;
+  }
+  button.ctl:active{background:#2d3542}
+  button.ctl.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+
+  /* ===== 読取リスト（ボトムシート） ===== */
+  #sheet{
+    position:fixed; left:0; right:0; bottom:0; max-height:72%;
+    background:var(--panel); border-top:1px solid var(--line);
+    border-radius:14px 14px 0 0; transform:translateY(100%);
+    transition:transform .22s ease; display:flex; flex-direction:column; z-index:20;
+  }
+  #sheet.open{transform:none}
+  #sheet .head{
+    display:flex; align-items:center; gap:10px; padding:12px 14px;
+    border-bottom:1px solid var(--line);
+  }
+  #sheet .head b{font-size:14px}
+  #sheet .head button{
+    background:none; border:none; color:var(--accent);
+    font-size:15px; padding:6px 8px;
+  }
+  #sheet .head #clearBtn{margin-left:auto}
+  #list{overflow:auto; -webkit-overflow-scrolling:touch; padding:6px 0 calc(14px + var(--safe-b)); margin:0}
+  #list li{
+    list-style:none; display:flex; align-items:baseline; gap:10px;
+    padding:10px 14px; border-bottom:1px solid #222833;
+  }
+  #list .no{color:var(--sub); font-size:12px; width:2.2em; text-align:right}
+  #list .code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:16px; letter-spacing:.04em}
+  #list .at{margin-left:auto; color:var(--sub); font-size:11px}
+  #list .empty{color:var(--sub); padding:20px 14px; text-align:center; border:none; display:block}
+
+  /* デバッグ行（実機での切り分け用） */
+  #debug{
+    position:absolute; top:0; left:0; right:0; padding:2px 6px;
+    font:10px/1.4 ui-monospace,Menlo,monospace; color:#8ea0b8; white-space:pre-wrap;
+    background:rgba(0,0,0,.45); pointer-events:none; display:none;
+  }
+  #debug.show{display:block}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>蔵書スキャナ</h1>
+    <div class="phase">フェーズ1 — ISBN 読取のみ</div>
+  </div>
+  <div class="count">読取 <b id="cnt">0</b> 件</div>
+</header>
+
+<div id="stage">
+  <video id="video" playsinline muted autoplay></video>
+  <div id="reticle"></div>
+  <div id="debug"></div>
+  <div id="toast"></div>
+  <div id="hint">枠の中に <b>978 / 979</b> で始まる上段のバーコードを入れてください</div>
+
+  <div id="startPanel">
+    <button id="startBtn">カメラを<br>起動</button>
+    <p>iOS ではボタンを押した直後でないとカメラを起動できません。起動後は枠に近づけるだけで連続して読み取ります。</p>
+  </div>
+</div>
+
+<div id="errorBox"></div>
+
+<footer>
+  <button class="ctl" id="toggleBtn" disabled>停止</button>
+  <button class="ctl" id="listBtn">一覧 (0)</button>
+  <button class="ctl" id="dbgBtn">情報</button>
+</footer>
+
+<div id="sheet">
+  <div class="head">
+    <b>読み取った ISBN</b>
+    <button id="clearBtn">全消去</button>
+    <button id="closeBtn">閉じる</button>
+  </div>
+  <ul id="list"><li class="empty">まだ読み取っていません</li></ul>
+</div>
+
+<script type="module">
+// =============================================================
+// 蔵書スキャナ フェーズ1
+//   カメラ + バーコード読取だけ。書誌取得も保存もしない。
+//   978/979 で始まる EAN-13 のみを採用し、チェックディジットを検証する。
+// =============================================================
+
+import {
+  readBarcodes,
+  prepareZXingModule,
+} from "https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.4/dist/es/reader/index.js";
+
+// wasm 本体の配置先（バージョン固定）
+const WASM_BASE = "https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.4/dist/reader/";
+
+// ---- DOM ----
+const $ = (id) => document.getElementById(id);
+const video     = $("video");
+const stage     = $("stage");
+const reticle   = $("reticle");
+const toastEl   = $("toast");
+const errorBox  = $("errorBox");
+const startPanel= $("startPanel");
+const startBtn  = $("startBtn");
+const toggleBtn = $("toggleBtn");
+const listBtn   = $("listBtn");
+const dbgBtn    = $("dbgBtn");
+const sheet     = $("sheet");
+const listEl    = $("list");
+const cntEl     = $("cnt");
+const debugEl   = $("debug");
+
+// ---- 状態 ----
+let stream = null;          // MediaStream
+let running = false;        // デコードループ稼働中か
+let wakeLock = null;
+let audioCtx = null;
+const found = [];           // 読み取った ISBN（新しいものを先頭に）
+const foundSet = new Set(); // 重複判定用
+const cooldown = new Map(); // isbn -> 最後に反応した時刻(ms)
+const COOLDOWN_MS = 2500;   // 同じコードへの再反応を抑える時間
+
+// 読取枠の大きさ（表示エリアに対する比率）
+const BOX = { w: 0.90, h: 0.42 };
+
+// デコード用の裏キャンバス
+const canvas = document.createElement("canvas");
+const ctx2d = canvas.getContext("2d", { willReadFrequently: true });
+
+// zxing-wasm の読取オプション
+//  formats は EAN13 のみ。ただし日本の書籍は2段バーコードで下段(192...)も EAN-13 なので
+//  maxNumberOfSymbols を増やして両方拾い、後段の isIsbn13() で上段だけ採用する。
+const READER_OPTIONS = {
+  formats: ["EAN13"],
+  tryHarder: true,
+  tryRotate: true,
+  tryInvert: false,
+  tryDownscale: true,
+  maxNumberOfSymbols: 4,
+  binarizer: "LocalAverage",
+  eanAddOnSymbol: "Ignore",
+  returnErrors: false,
+};
+
+// -------------------------------------------------------------
+// エラー表示（握り潰さない）
+// -------------------------------------------------------------
+function showError(title, detail) {
+  errorBox.innerHTML = "";
+  const b = document.createElement("b");
+  b.textContent = title;
+  errorBox.append(b, document.createTextNode(detail ? "\n" + detail : ""));
+  errorBox.classList.add("show");
+  console.error(title, detail);
+}
+function clearError() {
+  errorBox.classList.remove("show");
+  errorBox.textContent = "";
+}
+
+// -------------------------------------------------------------
+// EAN-13 / ISBN 判定
+// -------------------------------------------------------------
+/** EAN-13 のチェックディジット検証 */
+function isValidEan13(code) {
+  if (!/^\d{13}$/.test(code)) return false;
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    sum += Number(code[i]) * (i % 2 === 0 ? 1 : 3);
+  }
+  const check = (10 - (sum % 10)) % 10;
+  return check === Number(code[12]);
+}
+
+/** 書籍の ISBN-13 か（978/979 始まり ＋ チェックディジット） */
+function isIsbn13(code) {
+  return /^97[89]\d{10}$/.test(code) && isValidEan13(code);
+}
+
+// -------------------------------------------------------------
+// フィードバック（ビープ・バイブ・トースト）
+// -------------------------------------------------------------
+/** AudioContext はユーザー操作起点でしか作れないので起動ボタンで用意する */
+function initAudio() {
+  try {
+    if (!audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    }
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  } catch (e) {
+    // 音が出ないだけなので致命的ではない
+    console.warn("AudioContext 初期化に失敗", e);
+  }
+}
+
+function beep(freq, ms) {
+  if (!audioCtx) return;
+  try {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    const t = audioCtx.currentTime;
+    osc.type = "square";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.15, t + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + ms / 1000);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(t);
+    osc.stop(t + ms / 1000 + 0.02);
+  } catch (e) {
+    console.warn("beep 失敗", e);
+  }
+}
+
+function vibrate(pattern) {
+  // iOS Safari は navigator.vibrate 未対応。対応端末だけ振動する。
+  if (navigator.vibrate) { try { navigator.vibrate(pattern); } catch (_) {} }
+}
+
+let toastTimer = null;
+function toast(kind, isbn, note) {
+  toastEl.className = "show " + kind;
+  toastEl.innerHTML = '<div class="isbn"></div><div class="tag"></div>';
+  toastEl.querySelector(".isbn").textContent = isbn;
+  toastEl.querySelector(".tag").textContent = note;
+  reticle.classList.remove("hit", "dup");
+  reticle.classList.add(kind === "ok" ? "hit" : "dup");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toastEl.classList.remove("show");
+    reticle.classList.remove("hit", "dup");
+  }, 1600);
+}
+
+// -------------------------------------------------------------
+// 読取枠のレイアウト（CSS とデコード対象領域を同じ計算で合わせる）
+// -------------------------------------------------------------
+function layoutReticle() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  const rw = w * BOX.w, rh = h * BOX.h;
+  reticle.style.left   = ((w - rw) / 2) + "px";
+  reticle.style.top    = ((h - rh) / 2) + "px";
+  reticle.style.width  = rw + "px";
+  reticle.style.height = rh + "px";
+}
+window.addEventListener("resize", layoutReticle);
+window.addEventListener("orientationchange", () => setTimeout(layoutReticle, 300));
+
+/**
+ * 表示上の読取枠（object-fit:cover で描画されている）を
+ * video の実ピクセル座標に逆変換して切り出し範囲を返す。
+ */
+function cropRect() {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const dw = stage.clientWidth, dh = stage.clientHeight;
+  if (!vw || !vh || !dw || !dh) return null;
+
+  const scale = Math.max(dw / vw, dh / vh);   // cover の拡大率
+  const ox = (dw - vw * scale) / 2;           // 表示エリア内での映像左上オフセット
+  const oy = (dh - vh * scale) / 2;
+
+  const rw = dw * BOX.w, rh = dh * BOX.h;
+  const rx = (dw - rw) / 2, ry = (dh - rh) / 2;
+
+  let sx = (rx - ox) / scale;
+  let sy = (ry - oy) / scale;
+  let sw = rw / scale;
+  let sh = rh / scale;
+
+  // 念のため映像範囲内にクランプ
+  sx = Math.max(0, Math.min(vw - 1, sx));
+  sy = Math.max(0, Math.min(vh - 1, sy));
+  sw = Math.max(1, Math.min(vw - sx, sw));
+  sh = Math.max(1, Math.min(vh - sy, sh));
+  return { sx, sy, sw, sh };
+}
+
+// -------------------------------------------------------------
+// カメラ
+// -------------------------------------------------------------
+async function startCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showError("このブラウザではカメラを使えません",
+      "getUserMedia が見つかりません。HTTPS でアクセスしているか確認してください（http:// や file:// では動きません）。");
+    return false;
+  }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: "environment" },   // リアカメラ
+        width:  { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
+      audio: false,
+    });
+  } catch (e) {
+    const name = (e && e.name) || "UnknownError";
+    const msgs = {
+      NotAllowedError: "カメラの使用が許可されませんでした。Safari のアドレスバー左の「ぁあ」→「Webサイトの設定」→ カメラ を「許可」にして再読み込みしてください。",
+      NotFoundError: "使えるカメラが見つかりませんでした。",
+      NotReadableError: "カメラが他のアプリに使われている可能性があります。他のアプリを閉じて再試行してください。",
+      OverconstrainedError: "要求した解像度／背面カメラの条件を満たせませんでした。",
+      SecurityError: "安全な接続(HTTPS)でないためカメラを使えません。",
+    };
+    showError("カメラを起動できません（" + name + "）", msgs[name] || (e && e.message) || "");
+    return false;
+  }
+
+  video.srcObject = stream;
+  try {
+    await video.play();
+  } catch (e) {
+    showError("映像の再生に失敗しました", (e && e.message) || "");
+    return false;
+  }
+  // videoWidth が入るまで待つ
+  if (!video.videoWidth) {
+    await new Promise((res) => {
+      video.addEventListener("loadedmetadata", res, { once: true });
+      setTimeout(res, 3000);
+    });
+  }
+  layoutReticle();
+  return true;
+}
+
+function stopCamera() {
+  running = false;
+  if (stream) {
+    // track を確実に止める（これを怠ると iOS でカメラが掴まれたままになる）
+    stream.getTracks().forEach((t) => t.stop());
+    stream = null;
+  }
+  video.srcObject = null;
+  releaseWakeLock();
+}
+
+// -------------------------------------------------------------
+// 画面スリープ抑止（未対応なら黙って無視）
+// -------------------------------------------------------------
+async function requestWakeLock() {
+  try {
+    if ("wakeLock" in navigator) {
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; });
+    }
+  } catch (_) { /* 未対応 or 拒否。無視してよい */ }
+}
+function releaseWakeLock() {
+  if (wakeLock) { try { wakeLock.release(); } catch (_) {} wakeLock = null; }
+}
+
+// -------------------------------------------------------------
+// デコードループ
+// -------------------------------------------------------------
+let frames = 0, fps = 0, lastFpsAt = performance.now(), lastRaw = "-";
+
+async function decodeLoop() {
+  while (running) {
+    const t0 = performance.now();
+    try {
+      await decodeOnce();
+    } catch (e) {
+      // デコード中の例外でループを殺さない
+      console.warn("decode error", e);
+      lastRaw = "ERR:" + ((e && e.message) || e);
+    }
+    frames++;
+    const now = performance.now();
+    if (now - lastFpsAt >= 1000) {
+      fps = frames * 1000 / (now - lastFpsAt);
+      frames = 0; lastFpsAt = now;
+      updateDebug();
+    }
+    // 1周あたり最低 40ms 空けて UI を止めない
+    await new Promise((r) => setTimeout(r, Math.max(0, 40 - (now - t0))));
+  }
+}
+
+async function decodeOnce() {
+  if (video.readyState < 2) return;
+  const rect = cropRect();
+  if (!rect) return;
+
+  // 横幅 900px 程度に落として速度を稼ぐ（EAN-13 の解像度としては十分）
+  const targetW = Math.min(900, Math.round(rect.sw));
+  const targetH = Math.max(1, Math.round(rect.sh * (targetW / rect.sw)));
+  if (canvas.width !== targetW || canvas.height !== targetH) {
+    canvas.width = targetW; canvas.height = targetH;
+  }
+  ctx2d.drawImage(video, rect.sx, rect.sy, rect.sw, rect.sh, 0, 0, targetW, targetH);
+  const imageData = ctx2d.getImageData(0, 0, targetW, targetH);
+
+  const results = await readBarcodes(imageData, READER_OPTIONS);
+  if (!results.length) return;
+
+  lastRaw = results.map((r) => r.text).join(" / ");
+
+  for (const r of results) {
+    if (r.isValid === false) continue;
+    const code = (r.text || "").trim();
+    // 978/979 始まりの EAN-13 だけ採用（下段の 192... 分類・価格コードは捨てる）
+    if (!isIsbn13(code)) continue;
+    handleIsbn(code);
+  }
+}
+
+function handleIsbn(isbn) {
+  const now = Date.now();
+  if (now - (cooldown.get(isbn) || 0) < COOLDOWN_MS) return; // 直近に読んだものは無視
+  cooldown.set(isbn, now);
+
+  if (foundSet.has(isbn)) {
+    // フェーズ1では「このセッションで既に読んだ」の意味。
+    // フェーズ3で IndexedDB の登録済み判定に置き換える。
+    toast("dup", isbn, "読取済み（このセッション内）");
+    beep(330, 120);
+    vibrate(30);
+    return;
+  }
+
+  foundSet.add(isbn);
+  found.unshift({ isbn, at: new Date() });
+  renderList();
+  toast("ok", isbn, "ISBN として採用");
+  beep(880, 90);
+  vibrate([20, 40, 20]);
+}
+
+// -------------------------------------------------------------
+// 一覧描画
+// -------------------------------------------------------------
+function renderList() {
+  cntEl.textContent = found.length;
+  listBtn.textContent = "一覧 (" + found.length + ")";
+  listEl.innerHTML = "";
+  if (!found.length) {
+    const li = document.createElement("li");
+    li.className = "empty";
+    li.textContent = "まだ読み取っていません";
+    listEl.append(li);
+    return;
+  }
+  found.forEach((f, i) => {
+    const li = document.createElement("li");
+    const no = document.createElement("span");
+    no.className = "no"; no.textContent = String(found.length - i);
+    const code = document.createElement("span");
+    code.className = "code"; code.textContent = f.isbn;
+    const at = document.createElement("span");
+    at.className = "at";
+    at.textContent = f.at.toLocaleTimeString("ja-JP", { hour12: false });
+    li.append(no, code, at);
+    listEl.append(li);
+  });
+}
+
+function updateDebug() {
+  if (!debugEl.classList.contains("show")) return;
+  const vw = video.videoWidth || 0, vh = video.videoHeight || 0;
+  debugEl.textContent =
+    "cam " + vw + "x" + vh + " / decode " + canvas.width + "x" + canvas.height +
+    " / " + fps.toFixed(1) + " fps\nlast: " + lastRaw;
+}
+
+// -------------------------------------------------------------
+// 起動・停止
+// -------------------------------------------------------------
+async function start() {
+  clearError();
+  startBtn.disabled = true;
+  startBtn.textContent = "準備中…";
+  initAudio();
+
+  // wasm を先に取りに行く（初回のみ 約1MB）
+  try {
+    prepareZXingModule({
+      overrides: {
+        locateFile: (path, prefix) =>
+          path.endsWith(".wasm") ? WASM_BASE + path : prefix + path,
+      },
+      fireImmediately: true,
+    });
+  } catch (e) {
+    showError("読取エンジン(wasm)の読み込み設定に失敗しました", (e && e.message) || "");
+  }
+
+  const ok = await startCamera();
+  if (!ok) {
+    startBtn.disabled = false;
+    startBtn.textContent = "再試行";
+    return;
+  }
+
+  startPanel.style.display = "none";
+  toggleBtn.disabled = false;
+  toggleBtn.textContent = "停止";
+  toggleBtn.classList.remove("primary");
+  running = true;
+  requestWakeLock();
+  decodeLoop();
+}
+
+function pause() {
+  running = false;
+  stopCamera();
+  startPanel.style.display = "";
+  startBtn.disabled = false;
+  startBtn.innerHTML = "カメラを<br>再開";
+  toggleBtn.textContent = "再開";
+  toggleBtn.classList.add("primary");
+}
+
+// ---- イベント ----
+startBtn.addEventListener("click", start);
+
+toggleBtn.addEventListener("click", () => {
+  if (running) pause(); else start();
+});
+
+listBtn.addEventListener("click", () => sheet.classList.add("open"));
+$("closeBtn").addEventListener("click", () => sheet.classList.remove("open"));
+$("clearBtn").addEventListener("click", () => {
+  if (!found.length) return;
+  if (!confirm("読み取った ISBN をすべて消去します。よろしいですか？")) return;
+  found.length = 0; foundSet.clear(); cooldown.clear();
+  renderList();
+});
+dbgBtn.addEventListener("click", () => {
+  debugEl.classList.toggle("show");
+  updateDebug();
+});
+
+// タブが非アクティブ／画面を離れたらカメラを確実に解放する
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && running) pause();
+});
+window.addEventListener("pagehide", stopCamera);
+
+// 想定外の例外も画面に出す
+window.addEventListener("error", (ev) => {
+  showError("スクリプトエラー",
+    (ev.message || "") + "\n" + (ev.filename || "") + ":" + (ev.lineno || ""));
+});
+window.addEventListener("unhandledrejection", (ev) => {
+  const r = ev.reason;
+  showError("未処理のエラー", (r && (r.stack || r.message)) || String(r));
+});
+
+layoutReticle();
+renderList();
+</script>
+</body>
+</html>
