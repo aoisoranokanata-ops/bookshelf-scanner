@@ -6,6 +6,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0f1115">
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
 <title>蔵書スキャナ</title>
 <style>
   /* ===== 基本 ===== */
@@ -235,6 +238,19 @@
   #modal .acts button.primary{background:var(--accent); border-color:var(--accent); color:#fff}
   #modal .acts button.ghost{background:none; color:var(--sub); font-weight:400}
 
+  /* ===== 更新のお知らせ ===== */
+  #updateBar{
+    flex:0 0 auto; display:none; align-items:center; gap:10px;
+    padding:10px 12px; background:#1b3050; border-top:1px solid #2f4f80; font-size:13px;
+  }
+  #updateBar.show{display:flex}
+  #updateBar span{flex:1 1 auto; min-width:0}
+  #updateBar button{
+    flex:0 0 auto; border:none; border-radius:8px; background:var(--accent);
+    color:#fff; font-size:14px; font-weight:600; padding:10px 14px;
+  }
+  #updateBar .later{background:none; color:var(--sub); font-weight:400; padding:10px 6px}
+
   /* デバッグ行（実機での切り分け用） */
   #debug{
     position:absolute; top:0; left:0; right:0; padding:2px 6px;
@@ -249,7 +265,7 @@
 <header>
   <div>
     <h1>蔵書スキャナ</h1>
-    <div class="phase">フェーズ4 — Word 出力</div>
+    <div class="phase">フェーズ5 — 共有と PWA</div>
   </div>
   <div class="count">蔵書 <b id="cnt">0</b> 冊<br><span id="statLine" class="phase"></span></div>
 </header>
@@ -265,6 +281,12 @@
     <button id="startBtn">カメラを<br>起動</button>
     <p>iOS ではボタンを押した直後でないとカメラを起動できません。起動後は枠に近づけるだけで連続して読み取ります。</p>
   </div>
+</div>
+
+<div id="updateBar">
+  <span>新しい版があります</span>
+  <button id="updateBtn">更新する</button>
+  <button id="updateLater" class="later">あとで</button>
 </div>
 
 <div id="errorBox"></div>
@@ -360,6 +382,10 @@ import {
   prepareZXingModule,
 } from "https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.4/dist/es/reader/index.js";
 
+// 端末で「どの版が動いているか」を確かめられるようにしておく。
+// sw.js の VERSION と揃えること。
+const APP_VERSION = "v5.0.0";
+
 // wasm 本体の配置先（バージョン固定）
 const WASM_BASE = "https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.4/dist/reader/";
 
@@ -452,6 +478,9 @@ function dialog(title, body, actions) {
       btn.textContent = a.label;
       if (a.kind) btn.className = a.kind;
       btn.addEventListener("click", () => {
+        // run はクリックハンドラの中で同期的に呼ぶ。
+        // navigator.share はユーザー操作から間を空けると iOS に拒否されるため。
+        if (a.run) { try { a.run(); } catch (e) { console.warn("dialog run 失敗", e); } }
         $("modal").classList.remove("open");
         resolve(a.value);
       });
@@ -1152,7 +1181,8 @@ function render() {
   const list = visibleBooks();
   libStat.textContent =
     (qEl.value.trim() ? list.length + " 件表示 / " : "") +
-    "全 " + total + " 冊 ・ 要手入力 " + noTitle + (pending ? " ・ 照会中 " + pending : "");
+    "全 " + total + " 冊 ・ 要手入力 " + noTitle + (pending ? " ・ 照会中 " + pending : "") +
+    " ・ " + APP_VERSION;
 
   libList.innerHTML = "";
   if (!list.length) {
@@ -1553,8 +1583,13 @@ async function exportDocx() {
     const blob = await D.Packer.toBlob(doc);
     const d = new Date();
     const p = (n) => String(n).padStart(2, "0");
-    saveBlob(blob, "蔵書目録-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
-                   "-" + p(d.getHours()) + p(d.getMinutes()) + ".docx");
+    const name = "蔵書目録-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
+                 "-" + p(d.getHours()) + p(d.getMinutes()) + ".docx";
+    // ボタンを元に戻してから渡し方を選ばせる（共有は次のタップを起点にする）
+    btn.textContent = before;
+    btn.disabled = false;
+    await offerFile(blob, name, "蔵書目録を書き出しました");
+    return;
   } catch (e) {
     showError("Word の生成に失敗しました", (e && (e.stack || e.message)) || String(e));
   } finally {
@@ -1563,8 +1598,8 @@ async function exportDocx() {
   }
 }
 
-/** Blob をダウンロードとして保存させる（共有シート対応はフェーズ5） */
-function saveBlob(blob, filename) {
+/** 通常のダウンロードとして保存させる */
+function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = filename;
@@ -1574,13 +1609,64 @@ function saveBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
+/**
+ * 出来上がったファイルの渡し方をユーザーに選ばせる。
+ *
+ * navigator.share は「ユーザー操作の直後」でないと iOS に拒否される。
+ * そのため Blob を作り終えてからダイアログを出し、共有ボタンが押された
+ * そのハンドラの中で（await を挟まずに）share を呼ぶ構造にしている。
+ */
+async function offerFile(blob, filename, shareTitle) {
+  const file = new File([blob], filename, { type: blob.type });
+  const canShare = !!(navigator.canShare && navigator.share && navigator.canShare({ files: [file] }));
+
+  const size = blob.size < 1024 * 1024
+    ? Math.round(blob.size / 1024) + " KB"
+    : (blob.size / 1024 / 1024).toFixed(1) + " MB";
+
+  let sharing = null;
+  const actions = [];
+  if (canShare) {
+    actions.push({
+      label: "共有…（ドライブ・メールなど）",
+      value: "share",
+      kind: "primary",
+      run: () => { sharing = navigator.share({ files: [file], title: shareTitle }); },
+    });
+  }
+  actions.push({
+    label: canShare ? "この端末に保存" : "保存（ダウンロード）",
+    value: "download",
+    kind: canShare ? "" : "primary",
+    run: () => downloadBlob(blob, filename),
+  });
+  actions.push({ label: "やめる", value: null, kind: "ghost" });
+
+  const choice = await dialog(shareTitle,
+    filename + "\n" + size +
+    (canShare ? "" : "\n\nこの環境は共有シートに対応していないため、ダウンロードで保存します。"),
+    actions);
+
+  if (choice === "share" && sharing) {
+    try {
+      await sharing;
+    } catch (e) {
+      // ユーザーが共有シートを閉じただけなら何も言わない
+      if (e && e.name === "AbortError") return;
+      showError("共有できませんでした", ((e && e.message) || String(e)) +
+        "\n「この端末に保存」からダウンロードして、ファイルアプリ経由で渡してください。");
+    }
+  }
+  return choice;
+}
+
 // =============================================================
 // JSON エクスポート / インポート
 //   iOS Safari では IndexedDB が ITP で消える可能性があるため必須の機能
 // =============================================================
 const LS_BACKUP = "bookshelf.lastBackup";
 
-function exportJson() {
+async function exportJson() {
   const payload = {
     app: "bookshelf-scanner",
     format: 1,
@@ -1591,8 +1677,10 @@ function exportJson() {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const d = new Date();
   const p = (n) => String(n).padStart(2, "0");
-  saveBlob(blob, "bookshelf-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
-                 "-" + p(d.getHours()) + p(d.getMinutes()) + ".json");
+  const name = "bookshelf-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
+               "-" + p(d.getHours()) + p(d.getMinutes()) + ".json";
+  const choice = await offerFile(blob, name, "蔵書のバックアップ");
+  if (!choice) return;   // やめた場合はバックアップ済みにしない
 
   try {
     localStorage.setItem(LS_BACKUP, JSON.stringify({ at: new Date().toISOString(), count: books.length }));
@@ -1798,6 +1886,68 @@ window.addEventListener("unhandledrejection", (ev) => {
 });
 
 // =============================================================
+// Service Worker（オフライン対応と更新の通知）
+//   勝手にリロードしない。「更新する」を押されたときだけ切り替える。
+//   スキャン中に画面が飛ぶのを避けるため。
+// =============================================================
+let waitingWorker = null;
+
+function showUpdateBar() {
+  $("updateBar").classList.add("show");
+}
+
+async function registerSW() {
+  if (!("serviceWorker" in navigator)) return;
+  // file:// で開いたときなど、登録できない場面では黙って諦める
+  if (!window.isSecureContext) return;
+
+  try {
+    const reg = await navigator.serviceWorker.register("./sw.js", { scope: "./" });
+
+    // 既に新しい版が控えている
+    if (reg.waiting && navigator.serviceWorker.controller) {
+      waitingWorker = reg.waiting;
+      showUpdateBar();
+    }
+
+    reg.addEventListener("updatefound", () => {
+      const sw = reg.installing;
+      if (!sw) return;
+      sw.addEventListener("statechange", () => {
+        // controller があるということは初回インストールではなく「更新」
+        if (sw.state === "installed" && navigator.serviceWorker.controller) {
+          waitingWorker = sw;
+          showUpdateBar();
+        }
+      });
+    });
+
+    // 切り替わったら一度だけ読み直す
+    let reloading = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (reloading) return;
+      reloading = true;
+      location.reload();
+    });
+
+    // 復帰のたびに更新を確認する
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) reg.update().catch(() => {});
+    });
+  } catch (e) {
+    // オフライン化できないだけなので致命的ではない
+    console.warn("Service Worker を登録できませんでした", e);
+  }
+}
+
+$("updateBtn").addEventListener("click", () => {
+  $("updateBar").classList.remove("show");
+  if (waitingWorker) waitingWorker.postMessage({ type: "SKIP_WAITING" });
+  else location.reload();
+});
+$("updateLater").addEventListener("click", () => $("updateBar").classList.remove("show"));
+
+// =============================================================
 // 初回起動時の案内（iOS の ITP 対策）
 // =============================================================
 const LS_INTRO = "bookshelf.seenIntro";
@@ -1864,6 +2014,7 @@ async function maybeShowIntro() {
       [{ label: "分かった", value: null, kind: "primary" }]);
   }
   maybeShowIntro();
+  registerSW();
 })();
 </script>
 </body>
