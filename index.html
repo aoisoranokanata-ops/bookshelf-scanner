@@ -14,6 +14,7 @@
     --fg:#e8ecf2; --sub:#97a1b0;
     --ok:#3ddc84; --ng:#ff6b6b; --warn:#ffc042; --accent:#4c8dff;
     --safe-b: env(safe-area-inset-bottom, 0px);
+    --safe-t: env(safe-area-inset-top, 0px);
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
   html,body{height:100%}
@@ -26,7 +27,7 @@
   /* ===== ヘッダ ===== */
   header{
     flex:0 0 auto; display:flex; align-items:center; gap:8px;
-    padding:calc(env(safe-area-inset-top,0px) + 8px) 12px 8px;
+    padding:calc(var(--safe-t) + 8px) 12px 8px;
     background:var(--panel); border-bottom:1px solid var(--line);
   }
   header h1{font-size:15px; margin:0; font-weight:600; letter-spacing:.02em}
@@ -64,7 +65,7 @@
   #toast.ok{border-color:var(--ok)}
   #toast.dup{border-color:var(--warn)}
   #toast.ng{border-color:var(--ng)}
-  #toast .main{font-size:17px; font-weight:600}
+  #toast .main{font-size:17px; font-weight:600; overflow-wrap:anywhere}
   #toast .main.isbn{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.04em}
   #toast .tag{font-size:11px; color:var(--sub); margin-top:2px}
 
@@ -108,61 +109,131 @@
   button.ctl:active{background:#2d3542}
   button.ctl.primary{background:var(--accent); border-color:var(--accent); color:#fff}
 
-  /* ===== 読取リスト（ボトムシート） ===== */
-  #sheet{
-    position:fixed; left:0; right:0; bottom:0; top:0;
-    background:var(--panel); transform:translateY(100%);
-    transition:transform .22s ease; display:flex; flex-direction:column; z-index:20;
+  /* ===== 全画面ビュー（蔵書・編集） ===== */
+  .view{
+    position:fixed; inset:0; background:var(--bg); z-index:30;
+    transform:translateY(100%); transition:transform .22s ease;
+    display:flex; flex-direction:column;
   }
-  #sheet.open{transform:none}
-  #sheet .head{
+  .view.open{transform:none}
+  .view > .vhead{
     flex:0 0 auto; display:flex; align-items:center; gap:10px;
-    padding:calc(env(safe-area-inset-top,0px) + 10px) 14px 10px;
+    padding:calc(var(--safe-t) + 10px) 12px 10px;
+    background:var(--panel); border-bottom:1px solid var(--line);
   }
-  #sheet .head .who{flex:1 1 auto; min-width:0}
-  #sheet .head b{font-size:15px}
-  #sheet .head .stat{font-size:11px; color:var(--sub)}
-  /* 操作ボタンはヘッダとは別行に置く（横一列にすると iPhone 幅で溢れる） */
-  #sheet .acts{
-    flex:0 0 auto; display:flex; gap:8px; padding:0 14px 10px;
-    border-bottom:1px solid var(--line);
+  .view .vhead .who{flex:1 1 auto; min-width:0}
+  .view .vhead b{font-size:15px}
+  .view .vhead .stat{font-size:11px; color:var(--sub)}
+  .view .vhead button{
+    flex:0 0 auto; background:none; border:1px solid var(--line); border-radius:8px;
+    color:var(--accent); font-size:14px; padding:10px 12px; font-weight:600;
   }
-  #sheet button.act{
-    flex:1 1 0; min-width:0; background:none; border:1px solid var(--line);
-    border-radius:8px; color:var(--accent); font-size:13px; padding:10px 6px;
-    white-space:nowrap;
+  .view .vhead button.go{background:var(--accent); border-color:var(--accent); color:#fff}
+  .view .scroll{flex:1 1 auto; overflow:auto; -webkit-overflow-scrolling:touch}
+
+  /* ---- 蔵書ビューのツールバー ---- */
+  #tools{
+    flex:0 0 auto; display:flex; gap:8px; padding:10px 12px;
+    border-bottom:1px solid var(--line); background:var(--panel);
   }
-  #sheet button.act:active{background:#232a35}
-  #list{overflow:auto; -webkit-overflow-scrolling:touch; padding:0 0 calc(14px + var(--safe-b)); margin:0}
-  #list li{
-    list-style:none; display:flex; gap:10px; padding:10px 14px;
-    border-bottom:1px solid #222833; min-width:0;
+  #q{
+    flex:1 1 auto; min-width:0; font-size:16px; padding:10px 12px; border-radius:10px;
+    border:1px solid var(--line); background:#232a35; color:var(--fg);
   }
-  #list .cov{
+  #sortSel{
+    flex:0 0 auto; font-size:15px; padding:10px 6px; border-radius:10px;
+    border:1px solid var(--line); background:#232a35; color:var(--fg);
+  }
+  #backupBar{
+    flex:0 0 auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+    padding:8px 12px; border-bottom:1px solid var(--line); font-size:11px; color:var(--sub);
+  }
+  #backupBar .msg{flex:1 1 100%; min-width:0}
+  #backupBar .msg.warn{color:var(--warn)}
+  #backupBar button{
+    background:#232a35; border:1px solid var(--line); border-radius:8px;
+    color:var(--fg); font-size:12px; padding:8px 10px;
+  }
+
+  /* ---- 蔵書リスト ---- */
+  #libList{margin:0; padding:0 0 calc(24px + var(--safe-b))}
+  #libList li{
+    list-style:none; display:flex; gap:10px; padding:10px 12px;
+    border-bottom:1px solid #222833; min-width:0; align-items:flex-start;
+  }
+  #libList li:active{background:#161b23}
+  #libList .cov{
     flex:0 0 auto; width:40px; height:56px; border-radius:3px; object-fit:cover;
     background:#2a313d; border:1px solid var(--line);
   }
-  #list .body{flex:1 1 auto; min-width:0; overflow-wrap:anywhere}
-  #list .ttl{font-size:14px; font-weight:600; line-height:1.35}
-  #list .ttl.wait{color:var(--sub); font-weight:400}
-  #list .ttl.bad{color:var(--warn); font-weight:400}
-  #list .meta{font-size:12px; color:var(--sub); line-height:1.4}
-  #list .code{
+  #libList .body{flex:1 1 auto; min-width:0; overflow-wrap:anywhere}
+  #libList .ttl{font-size:14px; font-weight:600; line-height:1.35}
+  #libList .ttl.wait{color:var(--sub); font-weight:400}
+  #libList .ttl.bad{color:var(--warn); font-weight:400}
+  #libList .meta{font-size:12px; color:var(--sub); line-height:1.4}
+  #libList .code{
     font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px;
     color:var(--sub); letter-spacing:.03em;
   }
-  #list .src{
+  #libList .chip{
     display:inline-block; font-size:10px; padding:0 5px; border-radius:4px;
     border:1px solid var(--line); color:var(--sub); margin-left:6px; vertical-align:1px;
+    font-family:-apple-system,sans-serif; letter-spacing:0;
   }
-  #list .src.openbd{color:#8fd4a8; border-color:#2f5a41}
-  #list .src.googlebooks{color:#9cc2ff; border-color:#2f4468}
-  #list .no{flex:0 0 auto; color:var(--sub); font-size:11px; width:2em; text-align:right; padding-top:2px}
-  #list .retry{
+  #libList .chip.openbd{color:#8fd4a8; border-color:#2f5a41}
+  #libList .chip.googlebooks{color:#9cc2ff; border-color:#2f4468}
+  #libList .chip.manual{color:#d7b3ff; border-color:#4b3a66}
+  #libList .chip.loc{color:#ffd79a; border-color:#5c4527}
+  #libList .empty{color:var(--sub); padding:40px 14px; text-align:center; display:block}
+  #libList .retry{
     align-self:center; flex:0 0 auto; background:#2b323e; border:1px solid var(--line);
     color:var(--fg); border-radius:8px; font-size:12px; padding:8px 10px;
   }
-  #list .empty{color:var(--sub); padding:24px 14px; text-align:center; border:none; display:block}
+
+  /* ---- 編集フォーム ---- */
+  #form{padding:12px 12px calc(28px + var(--safe-b))}
+  #form label{display:block; margin:0 0 12px}
+  #form .lab{font-size:12px; color:var(--sub); margin-bottom:4px}
+  #form input, #form textarea{
+    width:100%; font-size:16px; font-family:inherit; padding:10px 12px; border-radius:10px;
+    border:1px solid var(--line); background:#232a35; color:var(--fg);
+  }
+  #form textarea{min-height:80px; resize:vertical}
+  #form input[readonly]{color:var(--sub); background:#1d232c}
+  #form .row{display:flex; gap:8px}
+  #form .row > *{flex:1 1 0; min-width:0}
+  #form .note{font-size:11px; color:var(--sub); margin:-8px 0 12px}
+  #form .danger{
+    width:100%; margin-top:8px; padding:14px; border-radius:10px;
+    background:#3a1c1c; border:1px solid #6b2b2b; color:#ffb3b3; font-size:15px; font-weight:600;
+  }
+  #isbnRow{display:flex; gap:8px}
+  #isbnRow input{flex:1 1 auto; min-width:0}
+  #isbnRow button{
+    flex:0 0 auto; padding:0 14px; border-radius:10px; border:1px solid var(--accent);
+    background:none; color:var(--accent); font-size:14px; font-weight:600;
+  }
+
+  /* ---- 汎用ダイアログ ---- */
+  #modal{
+    position:fixed; inset:0; z-index:50; display:none;
+    align-items:center; justify-content:center; padding:20px;
+    background:rgba(0,0,0,.6);
+  }
+  #modal.open{display:flex}
+  #modal .box{
+    width:100%; max-width:420px; background:var(--panel); border:1px solid var(--line);
+    border-radius:14px; padding:18px; max-height:80%; overflow:auto;
+  }
+  #modal h2{margin:0 0 8px; font-size:16px}
+  #modal p{margin:0 0 14px; font-size:13px; color:var(--sub); white-space:pre-wrap}
+  #modal .acts{display:flex; flex-direction:column; gap:8px}
+  #modal .acts button{
+    padding:13px; border-radius:10px; border:1px solid var(--line);
+    background:#232a35; color:var(--fg); font-size:15px; font-weight:600;
+  }
+  #modal .acts button.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+  #modal .acts button.ghost{background:none; color:var(--sub); font-weight:400}
 
   /* デバッグ行（実機での切り分け用） */
   #debug{
@@ -178,9 +249,9 @@
 <header>
   <div>
     <h1>蔵書スキャナ</h1>
-    <div class="phase">フェーズ2 — 書誌取得</div>
+    <div class="phase">フェーズ3 — 蔵書データベース</div>
   </div>
-  <div class="count">読取 <b id="cnt">0</b> 件<br><span id="statLine" class="phase"></span></div>
+  <div class="count">蔵書 <b id="cnt">0</b> 冊<br><span id="statLine" class="phase"></span></div>
 </header>
 
 <div id="stage">
@@ -200,31 +271,86 @@
 
 <footer>
   <button class="ctl" id="toggleBtn" disabled>停止</button>
-  <button class="ctl" id="listBtn">一覧 (0)</button>
-  <button class="ctl" id="dbgBtn">情報</button>
+  <button class="ctl" id="libBtn">蔵書 (0)</button>
+  <button class="ctl" id="manualBtn">手入力</button>
 </footer>
 
-<div id="sheet">
-  <div class="head">
+<!-- ===== 蔵書ビュー ===== -->
+<section class="view" id="library">
+  <div class="vhead">
     <div class="who">
-      <b>読み取った本</b>
-      <div class="stat" id="sheetStat"></div>
+      <b>蔵書</b>
+      <div class="stat" id="libStat"></div>
     </div>
-    <button class="act" id="closeBtn" style="flex:0 0 auto">閉じる</button>
+    <button id="dbgBtn">情報</button>
+    <button id="libCloseBtn">閉じる</button>
   </div>
-  <div class="acts">
-    <button class="act" id="retryAllBtn">未取得を再取得</button>
-    <button class="act" id="clearBtn">全消去</button>
+  <div id="tools">
+    <input id="q" type="search" placeholder="書名・著者・出版社・ISBN で絞り込み" autocomplete="off">
+    <select id="sortSel">
+      <option value="scannedAt">登録日</option>
+      <option value="title">書名</option>
+      <option value="authors">著者</option>
+      <option value="publisher">出版社</option>
+    </select>
   </div>
-  <ul id="list"></ul>
-</div>
+  <div id="backupBar">
+    <div class="msg" id="backupMsg"></div>
+    <button id="exportBtn">バックアップ (JSON)</button>
+    <button id="importBtn">読み込み</button>
+    <button id="retryAllBtn">未取得を再取得</button>
+    <input id="importFile" type="file" accept="application/json,.json" hidden>
+  </div>
+  <div class="scroll"><ul id="libList"></ul></div>
+</section>
+
+<!-- ===== 編集ビュー ===== -->
+<section class="view" id="editor">
+  <div class="vhead">
+    <div class="who"><b id="edTitle">編集</b><div class="stat" id="edStat"></div></div>
+    <button id="edCancel">やめる</button>
+    <button id="edSave" class="go">保存</button>
+  </div>
+  <div class="scroll">
+    <div id="form">
+      <label>
+        <div class="lab">ISBN</div>
+        <div id="isbnRow">
+          <input id="fIsbn" type="text" inputmode="numeric" autocomplete="off" placeholder="9784… (無い本は空のままで可)">
+          <button type="button" id="fLookup">照会</button>
+        </div>
+      </label>
+      <div class="note" id="isbnNote">バーコードが無い本は空のままで登録できます（内部キーが自動で振られます）。</div>
+
+      <label><div class="lab">書名</div><input id="fTitle" type="text" autocomplete="off"></label>
+      <label><div class="lab">サブタイトル</div><input id="fSubtitle" type="text" autocomplete="off"></label>
+      <label><div class="lab">著者（複数は ／ 区切り）</div><input id="fAuthors" type="text" autocomplete="off"></label>
+      <div class="row">
+        <label><div class="lab">出版社</div><input id="fPublisher" type="text" autocomplete="off"></label>
+        <label><div class="lab">出版年</div><input id="fPubdate" type="text" autocomplete="off" placeholder="2024-03"></label>
+      </div>
+      <label><div class="lab">配置場所</div><input id="fLocation" type="text" autocomplete="off" placeholder="本棚A 3段目"></label>
+      <label><div class="lab">タグ（読点・カンマ・空白区切り）</div><input id="fTags" type="text" autocomplete="off"></label>
+      <label><div class="lab">メモ</div><textarea id="fNote"></textarea></label>
+      <label><div class="lab">書影 URL</div><input id="fCover" type="url" autocomplete="off"></label>
+      <div class="note" id="srcNote"></div>
+      <button type="button" class="danger" id="edDelete">この本を削除</button>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 汎用ダイアログ ===== -->
+<div id="modal"><div class="box">
+  <h2 id="mTitle"></h2>
+  <p id="mBody"></p>
+  <div class="acts" id="mActs"></div>
+</div></div>
 
 <script type="module">
 // =============================================================
-// 蔵書スキャナ フェーズ2
-//   フェーズ1(カメラ + バーコード読取)に書誌取得を足したもの。
-//   openBD → (見つからなければ) Google Books の順に問い合わせる。
-//   まだ保存はしない（IndexedDB はフェーズ3）。
+// 蔵書スキャナ フェーズ3
+//   フェーズ2 までの「読取 + 書誌取得」に、IndexedDB への保存と
+//   蔵書一覧（検索・並べ替え・編集・削除）、手入力、JSON 入出力を足したもの。
 // =============================================================
 
 import {
@@ -245,21 +371,25 @@ const errorBox  = $("errorBox");
 const startPanel= $("startPanel");
 const startBtn  = $("startBtn");
 const toggleBtn = $("toggleBtn");
-const listBtn   = $("listBtn");
-const dbgBtn    = $("dbgBtn");
-const sheet     = $("sheet");
-const listEl    = $("list");
+const libBtn    = $("libBtn");
+const manualBtn = $("manualBtn");
+const libraryEl = $("library");
+const editorEl  = $("editor");
+const libList   = $("libList");
 const cntEl     = $("cnt");
 const statLine  = $("statLine");
-const sheetStat = $("sheetStat");
+const libStat   = $("libStat");
 const debugEl   = $("debug");
+const qEl       = $("q");
+const sortSel   = $("sortSel");
 
 // ---- 状態 ----
 let stream = null;          // MediaStream
 let running = false;        // デコードループ稼働中か
+let viewOpen = false;       // 全画面ビューを開いている間はデコードを止める
 let wakeLock = null;
 let audioCtx = null;
-const books = [];           // 読み取った本のレコード（新しいものを先頭に）
+const books = [];           // 全レコード（メモリ上のミラー）
 const byIsbn = new Map();   // isbn13 -> レコード
 const cooldown = new Map(); // isbn -> 最後に反応した時刻(ms)
 const COOLDOWN_MS = 2500;   // 同じコードへの再反応を抑える時間
@@ -307,6 +437,93 @@ function clearError() {
 }
 
 // -------------------------------------------------------------
+// 汎用ダイアログ（confirm より選択肢を出したい場面用）
+// -------------------------------------------------------------
+function dialog(title, body, actions) {
+  return new Promise((resolve) => {
+    $("mTitle").textContent = title;
+    $("mBody").textContent = body || "";
+    const acts = $("mActs");
+    acts.innerHTML = "";
+    actions.forEach((a) => {
+      const btn = document.createElement("button");
+      btn.textContent = a.label;
+      if (a.kind) btn.className = a.kind;
+      btn.addEventListener("click", () => {
+        $("modal").classList.remove("open");
+        resolve(a.value);
+      });
+      acts.append(btn);
+    });
+    $("modal").classList.add("open");
+  });
+}
+
+// =============================================================
+// IndexedDB
+//   DB名 bookshelf / store books / keyPath isbn13
+// =============================================================
+const DB_NAME = "bookshelf", DB_VER = 1, STORE = "books";
+let db = null;
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VER);
+    req.onupgradeneeded = () => {
+      const d = req.result;
+      if (!d.objectStoreNames.contains(STORE)) d.createObjectStore(STORE, { keyPath: "isbn13" });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function store(mode) {
+  return db.transaction(STORE, mode).objectStore(STORE);
+}
+function reqToPromise(req) {
+  return new Promise((res, rej) => {
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => rej(req.error);
+  });
+}
+
+/** 保存される形だけを取り出す（_ 始まりの実行時フィールドは保存しない） */
+function toPlain(rec) {
+  return {
+    isbn13:    rec.isbn13,
+    title:     rec.title || "",
+    subtitle:  rec.subtitle || "",
+    authors:   rec.authors || "",
+    publisher: rec.publisher || "",
+    pubdate:   rec.pubdate || "",
+    coverUrl:  rec.coverUrl || "",
+    location:  rec.location || "",
+    tags:      Array.isArray(rec.tags) ? rec.tags : [],
+    note:      rec.note || "",
+    source:    rec.source || "",
+    scannedAt: rec.scannedAt || new Date().toISOString(),
+  };
+}
+
+async function dbPut(rec) {
+  try {
+    await reqToPromise(store("readwrite").put(toPlain(rec)));
+  } catch (e) {
+    showError("保存できませんでした（" + rec.isbn13 + "）",
+      (e && e.message) || String(e) +
+      "\nプライベートブラウズ中だと IndexedDB が使えないことがあります。");
+    throw e;
+  }
+}
+async function dbDelete(key) {
+  await reqToPromise(store("readwrite").delete(key));
+}
+async function dbGetAll() {
+  return await reqToPromise(store("readonly").getAll());
+}
+
+// -------------------------------------------------------------
 // EAN-13 / ISBN 判定
 // -------------------------------------------------------------
 /** EAN-13 のチェックディジット検証 */
@@ -324,6 +541,16 @@ function isValidEan13(code) {
 function isIsbn13(code) {
   return /^97[89]\d{10}$/.test(code) && isValidEan13(code);
 }
+
+/** ISBN を持たない本のための内部キー */
+function makeNoIsbnKey() {
+  const d = new Date();
+  const p = (n, w) => String(n).padStart(w || 2, "0");
+  return "NOISBN-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
+         p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) +
+         "-" + Math.random().toString(36).slice(2, 6);
+}
+const isNoIsbn = (key) => String(key || "").startsWith("NOISBN-");
 
 // =============================================================
 // 書誌取得
@@ -405,8 +632,6 @@ async function fetchOpenBD(isbn) {
   const rawTitle = (te.TitleText && te.TitleText.content) || summary.title || "";
   const onixSub  = (te.Subtitle && te.Subtitle.content) || "";
   const split = splitTitle(rawTitle);
-  const title = split.title;
-  const subtitle = onixSub || split.subtitle;
 
   // 著者（ONIX の Contributor 優先、無ければ summary.author）
   let authors = toArray(dd.Contributor)
@@ -420,9 +645,10 @@ async function fetchOpenBD(isbn) {
   const dateRec = toArray(pd.PublishingDate).find((d) => d && d.Date);
   const pubdate = normPubdate(summary.pubdate || (dateRec && dateRec.Date) || "");
 
-  if (!title) return null;   // 中身が無いレコードは「無かった」扱いにする
+  if (!split.title) return null;   // 中身が無いレコードは「無かった」扱いにする
   return {
-    title, subtitle,
+    title: split.title,
+    subtitle: onixSub || split.subtitle,
     authors: authors.join("／"),
     publisher,
     pubdate,
@@ -467,11 +693,11 @@ let queueBusy = false;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function enqueue(rec) {
-  if (rec.status === "loading" || rec.queued) return;
-  rec.queued = true;
-  rec.status = "wait";
+  if (rec._status === "loading" || rec._queued) return;
+  rec._queued = true;
+  rec._status = "wait";
   queue.push(rec);
-  renderList();
+  render();
   pump();
 }
 
@@ -480,59 +706,61 @@ async function pump() {
   queueBusy = true;
   while (queue.length) {
     const rec = queue.shift();
-    rec.queued = false;
+    rec._queued = false;
     await lookupInto(rec);
     await sleep(200);          // API に連打を掛けない
   }
   queueBusy = false;
-  renderList();
+  render();
 }
 
-/** 1件ぶんの書誌取得。レコードを直接書き換える */
+/** 1件ぶんの書誌取得。成功したら IndexedDB も更新する */
 async function lookupInto(rec) {
-  rec.status = "loading";
-  rec.error = "";
-  renderList();
+  rec._status = "loading";
+  rec._error = "";
+  render();
   refreshToast(rec);
 
   const errs = [];
+  let got = null;
 
   // 1) openBD
   try {
-    const ob = await fetchOpenBD(rec.isbn13);
-    if (ob) { Object.assign(rec, ob); rec.status = "ok"; done(rec); return; }
+    got = await fetchOpenBD(rec.isbn13);
   } catch (e) {
     errs.push(e.message || String(e));
   }
 
   // 2) Google Books（openBD に無かった場合のみ）
-  try {
-    const gb = await fetchGoogleBooks(rec.isbn13);
-    if (gb) { Object.assign(rec, gb); rec.status = "ok"; done(rec); return; }
-  } catch (e) {
-    errs.push(e.message || String(e));
-    if (e.quota) {
-      showError("Google Books の利用上限に達しています",
-        "APIキー無しのリクエストは全利用者で1日の上限を共有しており、現在それを使い切っています。\n" +
-        "openBD で見つかる本はそのまま登録できます。見つからない本は「未取得を再取得」で後ほど試すか、手入力してください。");
+  if (!got) {
+    try {
+      got = await fetchGoogleBooks(rec.isbn13);
+    } catch (e) {
+      errs.push(e.message || String(e));
+      if (e.quota) {
+        showError("Google Books の利用上限に達しています",
+          "APIキー無しのリクエストは全利用者で1日の上限を共有しており、現在それを使い切っています。\n" +
+          "openBD で見つかる本はそのまま登録できます。見つからない本は「未取得を再取得」で後ほど試すか、手入力してください。");
+      }
     }
   }
 
-  if (errs.length) {
-    rec.status = "error";
-    rec.error = errs.join(" / ");
+  if (got) {
+    Object.assign(rec, got);
+    rec._status = "ok";
+    await dbPut(rec);
+  } else if (errs.length) {
+    // 通信に失敗した。ISBN だけの行として既に保存済みなので、データは壊れない
+    rec._status = "error";
+    rec._error = errs.join(" / ");
     if (!errs.some((m) => /429/.test(m))) {
-      showError("書誌の取得に失敗しました（" + rec.isbn13 + "）", rec.error);
+      showError("書誌の取得に失敗しました（" + rec.isbn13 + "）", rec._error);
     }
   } else {
     // どちらも「見つからなかった」= 通信は成功している
-    rec.status = "notfound";
+    rec._status = "notfound";
   }
-  done(rec);
-}
-
-function done(rec) {
-  renderList();
+  render();
   refreshToast(rec);
 }
 
@@ -602,19 +830,20 @@ function showToast(kind, isbn, main, sub, isbnStyle) {
 function refreshToast(rec) {
   if (toastIsbn !== rec.isbn13) return;
   const kindNow = toastEl.classList.contains("dup") ? "dup" : "ok";
-  if (rec.status === "ok") {
+  if (rec._status === "ok") {
     showToast(kindNow, rec.isbn13, rec.title, metaLine(rec) + "  /  " + srcLabel(rec.source));
-  } else if (rec.status === "notfound") {
-    showToast("ng", rec.isbn13, rec.isbn13, "書誌が見つかりません。書名は手入力してください", true);
-  } else if (rec.status === "error") {
-    showToast("ng", rec.isbn13, rec.isbn13, "取得失敗: " + rec.error, true);
+  } else if (rec._status === "notfound") {
+    showToast("ng", rec.isbn13, rec.isbn13, "書誌が見つかりません。手入力してください", true);
+  } else if (rec._status === "error") {
+    showToast("ng", rec.isbn13, rec.isbn13, "取得失敗: " + rec._error, true);
   } else {
     showToast(kindNow, rec.isbn13, rec.isbn13, "照会中…", true);
   }
 }
 
 function srcLabel(s) {
-  return s === "openbd" ? "openBD" : s === "googlebooks" ? "Google Books" : "";
+  return s === "openbd" ? "openBD" : s === "googlebooks" ? "Google Books"
+       : s === "manual" ? "手入力" : "";
 }
 function metaLine(rec) {
   return [rec.authors, rec.publisher, rec.pubdate].filter(Boolean).join(" / ");
@@ -745,6 +974,9 @@ let frames = 0, fps = 0, lastFpsAt = performance.now(), lastRaw = "-";
 
 async function decodeLoop() {
   while (running) {
+    // 蔵書・編集を開いている間はデコードしない（気付かないうちに登録されるのを防ぐ）
+    if (viewOpen) { await sleep(250); continue; }
+
     const t0 = performance.now();
     try {
       await decodeOnce();
@@ -793,73 +1025,119 @@ async function decodeOnce() {
   }
 }
 
-function handleIsbn(isbn) {
+async function handleIsbn(isbn) {
   const now = Date.now();
   if (now - (cooldown.get(isbn) || 0) < COOLDOWN_MS) return; // 直近に読んだものは無視
   cooldown.set(isbn, now);
 
   const known = byIsbn.get(isbn);
   if (known) {
-    // フェーズ1と同じくセッション内の重複。フェーズ3で IndexedDB 判定に置き換える。
+    // 仕様どおり、登録済みは上書きせずスキップ（重複購入チェックとしても機能させる）
+    const where = known.location ? "（" + known.location + "）" : "";
     showToast("dup", isbn,
-      known.status === "ok" ? known.title : isbn,
-      "読取済み（このセッション内）",
-      known.status !== "ok");
+      known.title || isbn,
+      "登録済み" + where + " — 上書きしません",
+      !known.title);
     beep(330, 120);
     vibrate(30);
     return;
   }
 
-  const rec = {
-    isbn13: isbn,
-    title: "", subtitle: "", authors: "", publisher: "", pubdate: "",
-    coverUrl: "", source: "", status: "wait", error: "",
-    scannedAt: new Date(),
-  };
+  // まず ISBN だけで保存してしまう。書誌取得が失敗してもデータは残る。
+  const rec = newRecord(isbn);
+  books.push(rec);
   byIsbn.set(isbn, rec);
-  books.unshift(rec);
   showToast("ok", isbn, isbn, "照会中…", true);
   beep(880, 90);
   vibrate([20, 40, 20]);
+  render();
+  try {
+    await dbPut(rec);
+  } catch (_) { /* showError 済み */ }
   enqueue(rec);   // 書誌取得は裏で流す。スキャンは止めない
 }
 
-// -------------------------------------------------------------
-// 一覧描画
-// -------------------------------------------------------------
+function newRecord(isbn) {
+  return {
+    isbn13: isbn,
+    title: "", subtitle: "", authors: "", publisher: "", pubdate: "",
+    coverUrl: "", location: "", tags: [], note: "", source: "",
+    scannedAt: new Date().toISOString(),
+    _status: "wait", _error: "",
+  };
+}
+
+// =============================================================
+// 蔵書ビュー（検索・並べ替え・一覧）
+// =============================================================
 const STATUS_TEXT = {
   wait:    "待機中…",
   loading: "照会中…",
-  notfound:"書誌が見つかりません（手入力が必要）",
+  notfound:"書誌が見つかりません（手入力してください）",
   error:   "取得失敗",
 };
 
-function renderList() {
-  const okCount = books.filter((b) => b.status === "ok").length;
-  const pending = books.filter((b) => b.status === "wait" || b.status === "loading").length;
-  const bad     = books.length - okCount - pending;
+/** 検索とソートを適用した表示用の配列を返す */
+function visibleBooks() {
+  const q = qEl.value.trim().toLowerCase();
+  let list = books;
+  if (q) {
+    const terms = q.split(/\s+/).filter(Boolean);
+    list = list.filter((b) => {
+      const hay = [b.title, b.subtitle, b.authors, b.publisher, b.isbn13,
+                   b.location, b.note, (b.tags || []).join(" ")]
+        .join(" ").toLowerCase();
+      return terms.every((t) => hay.includes(t));
+    });
+  }
+  const key = sortSel.value;
+  const sorted = list.slice();
+  if (key === "scannedAt") {
+    sorted.sort((a, b) => String(b.scannedAt).localeCompare(String(a.scannedAt))); // 新しい順
+  } else {
+    sorted.sort((a, b) => {
+      const av = (a[key] || "").toString(), bv = (b[key] || "").toString();
+      if (!av && bv) return 1;          // 空欄は末尾へ
+      if (av && !bv) return -1;
+      return av.localeCompare(bv, "ja");
+    });
+  }
+  return sorted;
+}
 
-  cntEl.textContent = books.length;
-  statLine.textContent = "書誌 " + okCount + " / 未取得 " + bad + (pending ? " / 照会中 " + pending : "");
-  sheetStat.textContent =
-    books.length + " 冊 ・ 書誌取得済 " + okCount + " ・ 未取得 " + bad + (pending ? " ・ 照会中 " + pending : "");
-  listBtn.textContent = "一覧 (" + books.length + ")";
+function render() {
+  const total = books.length;
+  const noTitle = books.filter((b) => !b.title).length;
+  const pending = books.filter((b) => b._status === "wait" || b._status === "loading").length;
 
-  listEl.innerHTML = "";
-  if (!books.length) {
+  cntEl.textContent = total;
+  statLine.textContent = "要手入力 " + noTitle + (pending ? " / 照会中 " + pending : "");
+  libBtn.textContent = "蔵書 (" + total + ")";
+
+  // 蔵書ビューを閉じている間は一覧の DOM を組み直さない（スキャン中の負荷を避ける）
+  if (!libraryEl.classList.contains("open")) return;
+
+  const list = visibleBooks();
+  libStat.textContent =
+    (qEl.value.trim() ? list.length + " 件表示 / " : "") +
+    "全 " + total + " 冊 ・ 要手入力 " + noTitle + (pending ? " ・ 照会中 " + pending : "");
+
+  libList.innerHTML = "";
+  if (!list.length) {
     const li = document.createElement("li");
     li.className = "empty";
-    li.textContent = "まだ読み取っていません";
-    listEl.append(li);
+    li.textContent = total ? "絞り込み条件に合う本がありません" : "まだ1冊も登録されていません";
+    libList.append(li);
+    updateBackupBar();
     return;
   }
 
-  books.forEach((rec, i) => {
+  list.forEach((rec) => {
     const li = document.createElement("li");
-
-    const no = document.createElement("span");
-    no.className = "no";
-    no.textContent = String(books.length - i);
+    li.addEventListener("click", (ev) => {
+      if (ev.target.closest(".retry")) return;
+      openEditor(rec);
+    });
 
     let cov;
     if (rec.coverUrl) {
@@ -879,31 +1157,37 @@ function renderList() {
 
     const ttl = document.createElement("div");
     ttl.className = "ttl";
-    if (rec.status === "ok") {
+    if (rec.title) {
       ttl.textContent = rec.title + (rec.subtitle ? " — " + rec.subtitle : "");
     } else {
-      ttl.textContent = STATUS_TEXT[rec.status] || rec.status;
-      ttl.classList.add(rec.status === "error" || rec.status === "notfound" ? "bad" : "wait");
+      ttl.textContent = STATUS_TEXT[rec._status] || "書名なし（手入力してください）";
+      ttl.classList.add(rec._status === "wait" || rec._status === "loading" ? "wait" : "bad");
     }
 
     const meta = document.createElement("div");
     meta.className = "meta";
-    meta.textContent = rec.status === "ok" ? metaLine(rec) : (rec.error || "");
+    meta.textContent = rec.title ? metaLine(rec) : (rec._error || "");
 
     const code = document.createElement("div");
     code.className = "code";
-    code.textContent = rec.isbn13;
+    code.textContent = isNoIsbn(rec.isbn13) ? "ISBNなし" : rec.isbn13;
     if (rec.source) {
-      const src = document.createElement("span");
-      src.className = "src " + rec.source;
-      src.textContent = srcLabel(rec.source);
-      code.append(src);
+      const chip = document.createElement("span");
+      chip.className = "chip " + rec.source;
+      chip.textContent = srcLabel(rec.source);
+      code.append(chip);
+    }
+    if (rec.location) {
+      const chip = document.createElement("span");
+      chip.className = "chip loc";
+      chip.textContent = rec.location;
+      code.append(chip);
     }
 
     body.append(ttl, meta, code);
-    li.append(no, cov, body);
+    li.append(cov, body);
 
-    if (rec.status === "error" || rec.status === "notfound") {
+    if (!isNoIsbn(rec.isbn13) && (rec._status === "error" || rec._status === "notfound") && !rec.title) {
       const btn = document.createElement("button");
       btn.className = "retry";
       btn.textContent = "再取得";
@@ -911,8 +1195,10 @@ function renderList() {
       li.append(btn);
     }
 
-    listEl.append(li);
+    libList.append(li);
   });
+
+  updateBackupBar();
 }
 
 function updateDebug() {
@@ -921,6 +1207,284 @@ function updateDebug() {
   debugEl.textContent =
     "cam " + vw + "x" + vh + " / decode " + canvas.width + "x" + canvas.height +
     " / " + fps.toFixed(1) + " fps / queue " + queue.length + "\nlast: " + lastRaw;
+}
+
+// =============================================================
+// 編集ビュー（新規手入力と既存編集を兼ねる）
+// =============================================================
+let editing = null;     // 編集中のレコード（新規は null）
+
+function openEditor(rec) {
+  editing = rec || null;
+  $("edTitle").textContent = rec ? "編集" : "手入力で登録";
+  $("edStat").textContent = rec
+    ? "登録 " + (rec.scannedAt || "").slice(0, 10) + (rec.source ? " ・ " + srcLabel(rec.source) : "")
+    : "バーコードの無い本もここから登録できます";
+  $("fIsbn").value      = rec && !isNoIsbn(rec.isbn13) ? rec.isbn13 : "";
+  $("fIsbn").readOnly   = !!rec;
+  $("fLookup").style.display = rec && isNoIsbn(rec.isbn13) ? "none" : "";
+  $("isbnNote").textContent = rec
+    ? (isNoIsbn(rec.isbn13) ? "この本は ISBN なしで登録されています（内部キー: " + rec.isbn13 + "）"
+                            : "登録済みの ISBN は変更できません。")
+    : "バーコードが無い本は空のままで登録できます（内部キーが自動で振られます）。";
+  $("fTitle").value     = rec ? rec.title : "";
+  $("fSubtitle").value  = rec ? rec.subtitle : "";
+  $("fAuthors").value   = rec ? rec.authors : "";
+  $("fPublisher").value = rec ? rec.publisher : "";
+  $("fPubdate").value   = rec ? rec.pubdate : "";
+  $("fLocation").value  = rec ? rec.location : "";
+  $("fTags").value      = rec ? (rec.tags || []).join("、") : "";
+  $("fNote").value      = rec ? rec.note : "";
+  $("fCover").value     = rec ? rec.coverUrl : "";
+  $("srcNote").textContent = rec && rec._error ? "直近の取得エラー: " + rec._error : "";
+  $("edDelete").style.display = rec ? "" : "none";
+  openView(editorEl);
+}
+
+function parseTags(s) {
+  return String(s || "").split(/[,、\s]+/).map((t) => t.trim()).filter(Boolean);
+}
+
+async function saveEditor() {
+  const isbnRaw = $("fIsbn").value.replace(/[-\s]/g, "").trim();
+  let rec = editing;
+
+  if (!rec) {
+    // 新規登録
+    let key;
+    if (isbnRaw) {
+      if (!isIsbn13(isbnRaw)) {
+        await dialog("ISBN が正しくありません",
+          "978 または 979 で始まる13桁で、チェックディジットが合っている必要があります。\n" +
+          "入力値: " + isbnRaw + "\n\nISBN が分からない本は、空欄のまま登録できます。",
+          [{ label: "戻る", value: null, kind: "primary" }]);
+        return;
+      }
+      if (byIsbn.has(isbnRaw)) {
+        const b = byIsbn.get(isbnRaw);
+        await dialog("すでに登録されています",
+          (b.title || isbnRaw) + "\n\n上書きしないので、編集したい場合は蔵書一覧から開いてください。",
+          [{ label: "分かった", value: null, kind: "primary" }]);
+        return;
+      }
+      key = isbnRaw;
+    } else {
+      key = makeNoIsbnKey();
+    }
+    rec = newRecord(key);
+    rec.source = "manual";
+    books.push(rec);
+    byIsbn.set(key, rec);
+  }
+
+  rec.title     = $("fTitle").value.trim();
+  rec.subtitle  = $("fSubtitle").value.trim();
+  rec.authors   = $("fAuthors").value.trim();
+  rec.publisher = $("fPublisher").value.trim();
+  rec.pubdate   = normPubdate($("fPubdate").value.trim());
+  rec.location  = $("fLocation").value.trim();
+  rec.tags      = parseTags($("fTags").value);
+  rec.note      = $("fNote").value.trim();
+  rec.coverUrl  = $("fCover").value.trim();
+  if (rec.title) rec._status = "ok";
+  if (!rec.source) rec.source = "manual";
+
+  try {
+    await dbPut(rec);
+  } catch (_) { return; }   // showError 済み。ビューは閉じない
+  closeView(editorEl);
+  render();
+}
+
+async function deleteEditing() {
+  if (!editing) return;
+  const ok = await dialog("削除しますか",
+    (editing.title || editing.isbn13) + "\n\nこの操作は取り消せません。",
+    [{ label: "削除する", value: true }, { label: "やめる", value: false, kind: "ghost" }]);
+  if (!ok) return;
+  try {
+    await dbDelete(editing.isbn13);
+  } catch (e) {
+    showError("削除できませんでした", (e && e.message) || String(e));
+    return;
+  }
+  const i = books.indexOf(editing);
+  if (i >= 0) books.splice(i, 1);
+  byIsbn.delete(editing.isbn13);
+  cooldown.delete(editing.isbn13);
+  editing = null;
+  closeView(editorEl);
+  render();
+}
+
+/** 手入力画面から ISBN を打って書誌を引く */
+async function lookupFromForm() {
+  const isbn = $("fIsbn").value.replace(/[-\s]/g, "").trim();
+  if (!isIsbn13(isbn)) {
+    await dialog("ISBN が正しくありません",
+      "978 または 979 で始まる13桁で、チェックディジットが合っている必要があります。",
+      [{ label: "戻る", value: null, kind: "primary" }]);
+    return;
+  }
+  const btn = $("fLookup");
+  const before = btn.textContent;
+  btn.textContent = "照会中";
+  btn.disabled = true;
+  try {
+    let got = null;
+    try { got = await fetchOpenBD(isbn); } catch (e) { /* 下で Google を試す */ }
+    if (!got) got = await fetchGoogleBooks(isbn);
+    if (!got) {
+      await dialog("見つかりませんでした",
+        "openBD と Google Books のどちらにもありませんでした。書名以下を手で入れてください。",
+        [{ label: "分かった", value: null, kind: "primary" }]);
+      return;
+    }
+    // 入力済みの欄は尊重し、空欄だけ埋める
+    const fill = (id, v) => { if (v && !$(id).value.trim()) $(id).value = v; };
+    fill("fTitle", got.title);
+    fill("fSubtitle", got.subtitle);
+    fill("fAuthors", got.authors);
+    fill("fPublisher", got.publisher);
+    fill("fPubdate", got.pubdate);
+    fill("fCover", got.coverUrl);
+    if (editing) editing.source = got.source;
+  } catch (e) {
+    showError("照会に失敗しました", (e && e.message) || String(e));
+  } finally {
+    btn.textContent = before;
+    btn.disabled = false;
+  }
+}
+
+// =============================================================
+// JSON エクスポート / インポート
+//   iOS Safari では IndexedDB が ITP で消える可能性があるため必須の機能
+// =============================================================
+const LS_BACKUP = "bookshelf.lastBackup";
+
+function exportJson() {
+  const payload = {
+    app: "bookshelf-scanner",
+    format: 1,
+    exportedAt: new Date().toISOString(),
+    count: books.length,
+    books: books.map(toPlain),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  const name = "bookshelf-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
+               "-" + p(d.getHours()) + p(d.getMinutes()) + ".json";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+
+  try {
+    localStorage.setItem(LS_BACKUP, JSON.stringify({ at: new Date().toISOString(), count: books.length }));
+  } catch (_) {}
+  updateBackupBar();
+}
+
+async function importJson(file) {
+  let payload;
+  try {
+    payload = JSON.parse(await file.text());
+  } catch (e) {
+    showError("読み込めませんでした", "JSON として解釈できません: " + ((e && e.message) || e));
+    return;
+  }
+  const incoming = Array.isArray(payload) ? payload : (payload && payload.books);
+  if (!Array.isArray(incoming)) {
+    showError("読み込めませんでした", "books 配列が見つかりません。このアプリが書き出した JSON を選んでください。");
+    return;
+  }
+  const valid = incoming.filter((b) => b && typeof b.isbn13 === "string" && b.isbn13);
+  if (!valid.length) {
+    showError("読み込めませんでした", "有効なレコードが1件もありませんでした。");
+    return;
+  }
+  const dup = valid.filter((b) => byIsbn.has(b.isbn13)).length;
+
+  const mode = await dialog("読み込み方法",
+    valid.length + " 件を読み込みます。\n" +
+    "うち " + dup + " 件が現在の蔵書と重複しています。\n" +
+    (valid.length !== incoming.length
+      ? "（" + (incoming.length - valid.length) + " 件は ISBN が無く読み飛ばします）\n" : ""),
+    [
+      { label: "重複はそのまま・新規だけ追加", value: "skip", kind: "primary" },
+      { label: "重複はファイルの内容で上書き", value: "overwrite" },
+      { label: "現在の蔵書を全部消して置き換え", value: "replace" },
+      { label: "やめる", value: null, kind: "ghost" },
+    ]);
+  if (!mode) return;
+
+  if (mode === "replace") {
+    const ok = await dialog("本当に置き換えますか",
+      "現在の " + books.length + " 冊をすべて削除してから " + valid.length + " 件を入れます。\nこの操作は取り消せません。",
+      [{ label: "置き換える", value: true }, { label: "やめる", value: false, kind: "ghost" }]);
+    if (!ok) return;
+    try {
+      await reqToPromise(store("readwrite").clear());
+    } catch (e) {
+      showError("消去に失敗しました", (e && e.message) || String(e));
+      return;
+    }
+    books.length = 0; byIsbn.clear(); cooldown.clear();
+  }
+
+  let added = 0, updated = 0, skipped = 0;
+  for (const raw of valid) {
+    const exists = byIsbn.get(raw.isbn13);
+    if (exists && mode === "skip") { skipped++; continue; }
+    const rec = Object.assign(exists || newRecord(raw.isbn13), toPlain(raw));
+    rec._status = rec.title ? "ok" : "notfound";
+    rec._error = "";
+    if (!exists) { books.push(rec); byIsbn.set(rec.isbn13, rec); added++; }
+    else updated++;
+    try { await dbPut(rec); } catch (_) { return; }
+  }
+  render();
+  await dialog("読み込みました",
+    "追加 " + added + " 件 / 上書き " + updated + " 件 / スキップ " + skipped + " 件",
+    [{ label: "閉じる", value: null, kind: "primary" }]);
+}
+
+function updateBackupBar() {
+  const msg = $("backupMsg");
+  let last = null;
+  try { last = JSON.parse(localStorage.getItem(LS_BACKUP) || "null"); } catch (_) {}
+  if (!books.length) {
+    msg.textContent = "";
+    msg.className = "msg";
+    return;
+  }
+  if (!last) {
+    msg.textContent = "まだ一度もバックアップしていません。iOS では使わない期間が続くと保存データが消えることがあります。";
+    msg.className = "msg warn";
+    return;
+  }
+  const diff = books.length - (last.count || 0);
+  const days = Math.floor((Date.now() - new Date(last.at).getTime()) / 86400000);
+  msg.textContent = "最終バックアップ: " + last.at.slice(0, 10) + "（" + last.count + " 冊時点）" +
+                    (diff > 0 ? " ・ その後 " + diff + " 冊増えています" : "");
+  msg.className = "msg" + (diff >= 10 || days >= 14 ? " warn" : "");
+}
+
+// =============================================================
+// ビューの開閉
+// =============================================================
+function openView(el) {
+  viewOpen = true;            // デコードを止める
+  el.classList.add("open");
+}
+function closeView(el) {
+  el.classList.remove("open");
+  viewOpen = libraryEl.classList.contains("open") || editorEl.classList.contains("open");
 }
 
 // -------------------------------------------------------------
@@ -973,29 +1537,35 @@ function pause() {
 
 // ---- イベント ----
 startBtn.addEventListener("click", start);
+toggleBtn.addEventListener("click", () => { if (running) pause(); else start(); });
 
-toggleBtn.addEventListener("click", () => {
-  if (running) pause(); else start();
+libBtn.addEventListener("click", () => { openView(libraryEl); render(); });
+$("libCloseBtn").addEventListener("click", () => closeView(libraryEl));
+manualBtn.addEventListener("click", () => openEditor(null));
+
+$("edCancel").addEventListener("click", () => closeView(editorEl));
+$("edSave").addEventListener("click", saveEditor);
+$("edDelete").addEventListener("click", deleteEditing);
+$("fLookup").addEventListener("click", lookupFromForm);
+
+qEl.addEventListener("input", render);
+sortSel.addEventListener("change", render);
+
+$("exportBtn").addEventListener("click", exportJson);
+$("importBtn").addEventListener("click", () => $("importFile").click());
+$("importFile").addEventListener("change", (ev) => {
+  const f = ev.target.files && ev.target.files[0];
+  ev.target.value = "";     // 同じファイルを続けて選べるように
+  if (f) importJson(f);
 });
-
-listBtn.addEventListener("click", () => sheet.classList.add("open"));
-$("closeBtn").addEventListener("click", () => sheet.classList.remove("open"));
-
 $("retryAllBtn").addEventListener("click", () => {
-  const targets = books.filter((b) => b.status === "error" || b.status === "notfound");
+  const targets = books.filter((b) => !b.title && !isNoIsbn(b.isbn13));
   if (!targets.length) return;
   clearError();
   targets.forEach(enqueue);
 });
 
-$("clearBtn").addEventListener("click", () => {
-  if (!books.length) return;
-  if (!confirm("読み取った内容をすべて消去します。よろしいですか？")) return;
-  books.length = 0; byIsbn.clear(); cooldown.clear(); queue.length = 0;
-  renderList();
-});
-
-dbgBtn.addEventListener("click", () => {
+$("dbgBtn").addEventListener("click", () => {
   debugEl.classList.toggle("show");
   updateDebug();
 });
@@ -1016,8 +1586,54 @@ window.addEventListener("unhandledrejection", (ev) => {
   showError("未処理のエラー", (r && (r.stack || r.message)) || String(r));
 });
 
-layoutReticle();
-renderList();
+// =============================================================
+// 初回起動時の案内（iOS の ITP 対策）
+// =============================================================
+const LS_INTRO = "bookshelf.seenIntro";
+function isStandalone() {
+  return window.navigator.standalone === true ||
+         (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+}
+async function maybeShowIntro() {
+  let seen = null;
+  try { seen = localStorage.getItem(LS_INTRO); } catch (_) { return; }
+  if (seen || isStandalone()) return;
+  await dialog("ホーム画面に追加して使ってください",
+    "iOS の Safari は、しばらく使わないでいるとサイトの保存データ（この蔵書データ）を消すことがあります。\n\n" +
+    "共有ボタン → 「ホーム画面に追加」 をしてから、そのアイコンで開くと消されなくなります。\n\n" +
+    "併せて、蔵書画面の「バックアップ (JSON)」でときどき書き出しておいてください。",
+    [{ label: "分かった", value: null, kind: "primary" }]);
+  try { localStorage.setItem(LS_INTRO, "1"); } catch (_) {}
+}
+
+// =============================================================
+// 起動処理
+// =============================================================
+(async function init() {
+  layoutReticle();
+  try {
+    db = await openDB();
+  } catch (e) {
+    showError("保存領域(IndexedDB)を開けません",
+      ((e && e.message) || String(e)) +
+      "\nプライベートブラウズ中だと使えません。通常のタブで開いてください。");
+    render();
+    return;
+  }
+  try {
+    const rows = await dbGetAll();
+    rows.forEach((row) => {
+      const rec = Object.assign(newRecord(row.isbn13), row);
+      rec._status = row.title ? "ok" : "notfound";
+      books.push(rec);
+      byIsbn.set(rec.isbn13, rec);
+    });
+  } catch (e) {
+    showError("保存済みデータを読み出せませんでした", (e && e.message) || String(e));
+  }
+  render();
+  maybeShowIntro();
+})();
 </script>
 </body>
 </html>
