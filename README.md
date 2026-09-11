@@ -12,8 +12,8 @@
 |---|---|---|
 | 1 | カメラとバーコード読取 | 完了（実機確認済み） |
 | 2 | 書誌取得（openBD → Google Books） | 完了（実機確認済み） |
-| 3 | IndexedDB と一覧画面・手入力・JSON 入出力 | 実装済み（実機確認待ち） |
-| 4 | Word 出力 | 未着手 |
+| 3 | IndexedDB と一覧画面・手入力・JSON 入出力 | 完了（実機確認済み） |
+| 4 | Word 出力 | 実装済み（実機確認待ち） |
 | 5 | 共有と PWA 化 | 未着手 |
 
 ## 依存ライブラリ（バージョン固定）
@@ -21,8 +21,15 @@
 | ライブラリ | バージョン | 用途 | 読み込み元 |
 |---|---|---|---|
 | [zxing-wasm](https://github.com/Sec-ant/zxing-wasm) | **3.1.4** | バーコード（EAN-13）読取 | `https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.4/dist/es/reader/index.js`<br>wasm 本体: `https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.4/dist/reader/zxing_reader.wasm`（約 930KB、初回のみ取得） |
+| [docx](https://github.com/dolanmiu/docx) | **9.7.1** | Word (.docx) 生成 | `https://cdn.jsdelivr.net/npm/docx@9.7.1/dist/index.mjs`（約 1.0MB、Word 出力を押したときだけ読み込む） |
 
-フェーズ 4 で `docx` を追加予定。
+### docx を UMD ではなく ESM で読む理由
+
+仕様では UMD を想定していたが、jsDelivr は `dist/index.umd.cjs` を
+`Content-Type: application/node` ＋ `X-Content-Type-Options: nosniff` で返すため、
+`<script src>` ではブラウザが実行を拒否する。
+ESM 版 `dist/index.mjs` は `application/javascript` で返り、外部への bare import も
+持たないのでそのまま `import()` できる。
 
 ### zxing-wasm 3.x の API メモ
 
@@ -153,6 +160,38 @@ iOS の ITP で IndexedDB が消えうるため必須（仕様 4-6）。
   10冊以上増えた／14日以上経った場合は色を変えて促す
 - 初回起動時に「ホーム画面に追加して使ってください」の案内を一度だけ出す
   （ホーム画面から開いている場合は出さない）
+
+## フェーズ4 の実装内容
+
+### Word 目録
+
+- A4 縦・左右15mm/上下18mm 余白（本文幅 180mm）
+- 1ページ目に「蔵書目録」見出し、出力日時、総冊数
+- 表：`No. / 書名 / 著者 / 出版社 / 出版年 / ISBN / 配置場所`（幅 10/52/32/26/16/26/18 mm）
+- ヘッダ行は `tableHeader: true`。ページをまたいでも繰り返される
+- 書名セルはサブタイトルを2行目に小さく添える。並列書名は出さない
+- ISBN の無い本は `—` と表示
+- フッタ中央にページ番号（`PAGE` フィールド）
+- 並び順は蔵書画面で選んでいる順をそのまま使う
+- 出力前に、絞り込み中なら「絞り込み結果だけ / 全件 / やめる」を選ばせる
+- 本文フォントは `Yu Gothic`。文字列で指定するだけで `w:eastAsia` まで入るため
+  日本語も同じ書体で出る（別の書体にしたい場合は `DOC_FONT` を変える）
+
+### 並列書名を別項目へ（`altTitle`）
+
+openBD のタイトルには `本題 = Parallel title : サブタイトル` の形で
+並列書名（欧文タイトルなど）が混ざる。目録では邪魔なので `altTitle` に分ける。
+
+ただし `ぎゃるアシ = Gal Assistant. 3` のように**巻数が並列書名の末尾に付く**本があるため、
+末尾の数字だけは本題側へ戻す。
+
+| 元のタイトル | title | altTitle | subtitle |
+|---|---|---|---|
+| `ハイパーインフレーション = Hyper inflation 05` | ハイパーインフレーション **05** | Hyper inflation | |
+| `プロを目指す人のためのTypeScript入門 = Introduction to TypeScript for future professionals : 安全なコードの書き方から高度な型の使い方まで` | プロを目指す人のためのTypeScript入門 | Introduction to TypeScript for future professionals | 安全なコードの書き方から高度な型の使い方まで |
+
+既存データは起動時に一度だけ自動で分割し、その旨を画面に出す。
+判定を誤った本は蔵書一覧から直せる。
 
 ### iOS 対応として入れてあること
 

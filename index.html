@@ -249,7 +249,7 @@
 <header>
   <div>
     <h1>蔵書スキャナ</h1>
-    <div class="phase">フェーズ3 — 蔵書データベース</div>
+    <div class="phase">フェーズ4 — Word 出力</div>
   </div>
   <div class="count">蔵書 <b id="cnt">0</b> 冊<br><span id="statLine" class="phase"></span></div>
 </header>
@@ -296,6 +296,7 @@
   </div>
   <div id="backupBar">
     <div class="msg" id="backupMsg"></div>
+    <button id="docxBtn">Word 目録を出力</button>
     <button id="exportBtn">バックアップ (JSON)</button>
     <button id="importBtn">読み込み</button>
     <button id="retryAllBtn">未取得を再取得</button>
@@ -324,6 +325,7 @@
 
       <label><div class="lab">書名</div><input id="fTitle" type="text" autocomplete="off"></label>
       <label><div class="lab">サブタイトル</div><input id="fSubtitle" type="text" autocomplete="off"></label>
+      <label><div class="lab">並列書名（欧文タイトルなど・Word 目録には出しません）</div><input id="fAltTitle" type="text" autocomplete="off"></label>
       <label><div class="lab">著者（複数は ／ 区切り）</div><input id="fAuthors" type="text" autocomplete="off"></label>
       <div class="row">
         <label><div class="lab">出版社</div><input id="fPublisher" type="text" autocomplete="off"></label>
@@ -493,6 +495,7 @@ function toPlain(rec) {
   return {
     isbn13:    rec.isbn13,
     title:     rec.title || "",
+    altTitle:  rec.altTitle || "",   // "= " の後ろに付いてくる並列書名（欧文タイトルなど）
     subtitle:  rec.subtitle || "",
     authors:   rec.authors || "",
     publisher: rec.publisher || "",
@@ -607,12 +610,31 @@ function normPersonName(raw) {
   return s;
 }
 
-/** "本題 = Parallel title : サブタイトル" を本題とサブタイトルに割る */
+/**
+ * "本題 = Parallel title : サブタイトル" を 本題 / 並列書名 / サブタイトル に割る。
+ *
+ * 並列書名（= の後ろ）は蔵書目録では邪魔になるので本題から外すが、
+ * "ぎゃるアシ = Gal Assistant. 3" のように巻数が並列書名の末尾に付く本があるため、
+ * 末尾の数字だけは本題側に移しておく（そうしないと巻数が目録から消える）。
+ */
 function splitTitle(raw) {
-  const s = (raw || "").trim();
-  const i = s.indexOf(" : ");
-  if (i < 0) return { title: s, subtitle: "" };
-  return { title: s.slice(0, i).trim(), subtitle: s.slice(i + 3).trim() };
+  let s = (raw || "").trim();
+
+  let subtitle = "";
+  const ci = s.indexOf(" : ");
+  if (ci >= 0) { subtitle = s.slice(ci + 3).trim(); s = s.slice(0, ci).trim(); }
+
+  let altTitle = "";
+  const ei = s.indexOf(" = ");
+  if (ei >= 0) { altTitle = s.slice(ei + 3).trim(); s = s.slice(0, ei).trim(); }
+
+  // 並列書名の末尾が巻数なら本題へ戻す（本題が既に数字で終わっている場合は触らない）
+  if (altTitle && !/\d\s*$/.test(s)) {
+    const m = altTitle.match(/^(.*[^\d\s])[\s.]+(\d{1,3})$/);
+    if (m) { altTitle = m[1].trim(); s = s + " " + m[2]; }
+  }
+
+  return { title: s, subtitle, altTitle };
 }
 
 const toArray = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]);
@@ -648,6 +670,7 @@ async function fetchOpenBD(isbn) {
   if (!split.title) return null;   // 中身が無いレコードは「無かった」扱いにする
   return {
     title: split.title,
+    altTitle: split.altTitle,
     subtitle: onixSub || split.subtitle,
     authors: authors.join("／"),
     publisher,
@@ -678,6 +701,7 @@ async function fetchGoogleBooks(isbn) {
   if (!vi.title) return null;
   return {
     title: vi.title,
+    altTitle: "",              // Google Books は並列書名を混ぜてこない
     subtitle: vi.subtitle || "",
     authors: (vi.authors || []).join("／"),
     publisher: vi.publisher || "",
@@ -1060,7 +1084,7 @@ async function handleIsbn(isbn) {
 function newRecord(isbn) {
   return {
     isbn13: isbn,
-    title: "", subtitle: "", authors: "", publisher: "", pubdate: "",
+    title: "", altTitle: "", subtitle: "", authors: "", publisher: "", pubdate: "",
     coverUrl: "", location: "", tags: [], note: "", source: "",
     scannedAt: new Date().toISOString(),
     _status: "wait", _error: "",
@@ -1077,19 +1101,24 @@ const STATUS_TEXT = {
   error:   "取得失敗",
 };
 
-/** 検索とソートを適用した表示用の配列を返す */
-function visibleBooks() {
+/** いま絞り込みが掛かっているか */
+const isFiltered = () => qEl.value.trim().length > 0;
+
+/** 検索語で絞り込む */
+function filterBooks() {
   const q = qEl.value.trim().toLowerCase();
-  let list = books;
-  if (q) {
-    const terms = q.split(/\s+/).filter(Boolean);
-    list = list.filter((b) => {
-      const hay = [b.title, b.subtitle, b.authors, b.publisher, b.isbn13,
-                   b.location, b.note, (b.tags || []).join(" ")]
-        .join(" ").toLowerCase();
-      return terms.every((t) => hay.includes(t));
-    });
-  }
+  if (!q) return books.slice();
+  const terms = q.split(/\s+/).filter(Boolean);
+  return books.filter((b) => {
+    const hay = [b.title, b.altTitle, b.subtitle, b.authors, b.publisher, b.isbn13,
+                 b.location, b.note, (b.tags || []).join(" ")]
+      .join(" ").toLowerCase();
+    return terms.every((t) => hay.includes(t));
+  });
+}
+
+/** 画面で選ばれている順に並べ替える */
+function sortBooks(list) {
   const key = sortSel.value;
   const sorted = list.slice();
   if (key === "scannedAt") {
@@ -1104,6 +1133,9 @@ function visibleBooks() {
   }
   return sorted;
 }
+
+/** 検索とソートを適用した表示用の配列 */
+const visibleBooks = () => sortBooks(filterBooks());
 
 function render() {
   const total = books.length;
@@ -1229,6 +1261,7 @@ function openEditor(rec) {
     : "バーコードが無い本は空のままで登録できます（内部キーが自動で振られます）。";
   $("fTitle").value     = rec ? rec.title : "";
   $("fSubtitle").value  = rec ? rec.subtitle : "";
+  $("fAltTitle").value  = rec ? (rec.altTitle || "") : "";
   $("fAuthors").value   = rec ? rec.authors : "";
   $("fPublisher").value = rec ? rec.publisher : "";
   $("fPubdate").value   = rec ? rec.pubdate : "";
@@ -1279,6 +1312,7 @@ async function saveEditor() {
 
   rec.title     = $("fTitle").value.trim();
   rec.subtitle  = $("fSubtitle").value.trim();
+  rec.altTitle  = $("fAltTitle").value.trim();
   rec.authors   = $("fAuthors").value.trim();
   rec.publisher = $("fPublisher").value.trim();
   rec.pubdate   = normPubdate($("fPubdate").value.trim());
@@ -1343,6 +1377,7 @@ async function lookupFromForm() {
     // 入力済みの欄は尊重し、空欄だけ埋める
     const fill = (id, v) => { if (v && !$(id).value.trim()) $(id).value = v; };
     fill("fTitle", got.title);
+    fill("fAltTitle", got.altTitle);
     fill("fSubtitle", got.subtitle);
     fill("fAuthors", got.authors);
     fill("fPublisher", got.publisher);
@@ -1355,6 +1390,188 @@ async function lookupFromForm() {
     btn.textContent = before;
     btn.disabled = false;
   }
+}
+
+// =============================================================
+// Word (.docx) 出力
+//   docx 9.7.1 を ESM で遅延読み込みする（約1MB なので起動時には取りに行かない）
+//   UMD ビルド(index.umd.cjs)は jsDelivr が application/node + nosniff で返すため
+//   <script> では読めない。ESM の dist/index.mjs を使う。
+// =============================================================
+const DOCX_URL = "https://cdn.jsdelivr.net/npm/docx@9.7.1/dist/index.mjs";
+let docxLib = null;
+
+async function loadDocx() {
+  if (!docxLib) docxLib = await import(DOCX_URL);
+  return docxLib;
+}
+
+// 本文フォント。Windows の Word と macOS/iOS のどちらにもあるものを既定にする
+const DOC_FONT = "Yu Gothic";
+
+/** 表の列。幅は mm（A4 縦・左右15mm 余白で本文幅 180mm） */
+const COLUMNS = [
+  { head: "No.",    w: 10, get: (r, i) => String(i + 1), align: "right" },
+  { head: "書名",    w: 52, get: (r) => r.title || "（書名未入力）", sub: (r) => r.subtitle },
+  { head: "著者",    w: 32, get: (r) => r.authors },
+  { head: "出版社",  w: 26, get: (r) => r.publisher },
+  { head: "出版年",  w: 16, get: (r) => r.pubdate },
+  { head: "ISBN",   w: 26, get: (r) => (isNoIsbn(r.isbn13) ? "—" : r.isbn13) },
+  { head: "配置場所", w: 18, get: (r) => r.location },
+];
+
+function buildDocument(D, list, scopeLabel) {
+  const mm = D.convertMillimetersToTwip;
+  const widths = COLUMNS.map((c) => mm(c.w));
+  const CELL_MARGIN = { top: 40, bottom: 40, left: 70, right: 70 };
+
+  const runOpts = (extra) => Object.assign({ font: DOC_FONT, size: 18 }, extra); // 18 half-pt = 9pt
+
+  const cell = (children, opts) => new D.TableCell({
+    width: { size: opts.w, type: D.WidthType.DXA },
+    shading: opts.head ? { fill: "E7EBF0" } : undefined,
+    verticalAlign: D.VerticalAlign.CENTER,
+    margins: CELL_MARGIN,
+    children,
+  });
+
+  const textCell = (text, opts) => cell(
+    [new D.Paragraph({
+      alignment: opts.align === "right" ? D.AlignmentType.RIGHT : D.AlignmentType.LEFT,
+      children: [new D.TextRun(runOpts({ text: text || "", bold: !!opts.head }))],
+    })], opts);
+
+  // ヘッダ行（tableHeader: true でページをまたいでも繰り返される）
+  const headerRow = new D.TableRow({
+    tableHeader: true,
+    children: COLUMNS.map((c, i) =>
+      textCell(c.head, { w: widths[i], head: true, align: c.align })),
+  });
+
+  const bodyRows = list.map((rec, idx) => new D.TableRow({
+    children: COLUMNS.map((c, i) => {
+      const main = c.get(rec, idx);
+      const sub = c.sub ? c.sub(rec) : "";
+      if (!sub) return textCell(main, { w: widths[i], align: c.align });
+      // 書名の下にサブタイトルを小さく添える
+      return cell([
+        new D.Paragraph({ children: [new D.TextRun(runOpts({ text: main }))] }),
+        new D.Paragraph({ children: [new D.TextRun(runOpts({ text: sub, size: 16, color: "555555" }))] }),
+      ], { w: widths[i] });
+    }),
+  }));
+
+  const table = new D.Table({
+    width: { size: 100, type: D.WidthType.PERCENTAGE },
+    layout: D.TableLayoutType.FIXED,
+    columnWidths: widths,
+    rows: [headerRow, ...bodyRows],
+  });
+
+  const now = new Date();
+  const stamp = now.getFullYear() + "年" + (now.getMonth() + 1) + "月" + now.getDate() + "日 " +
+                String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+
+  return new D.Document({
+    styles: { default: { document: { run: { font: DOC_FONT, size: 18 } } } },
+    sections: [{
+      properties: {
+        page: {
+          size: { width: mm(210), height: mm(297) },      // A4 縦
+          margin: { top: mm(18), bottom: mm(18), left: mm(15), right: mm(15) },
+        },
+      },
+      footers: {
+        default: new D.Footer({
+          children: [new D.Paragraph({
+            alignment: D.AlignmentType.CENTER,
+            children: [new D.TextRun(runOpts({ children: ["— ", D.PageNumber.CURRENT, " —"], size: 16, color: "777777" }))],
+          })],
+        }),
+      },
+      children: [
+        new D.Paragraph({
+          alignment: D.AlignmentType.CENTER,
+          spacing: { after: 120 },
+          children: [new D.TextRun(runOpts({ text: "蔵書目録", bold: true, size: 36 }))],  // 18pt
+        }),
+        new D.Paragraph({
+          alignment: D.AlignmentType.CENTER,
+          spacing: { after: 240 },
+          children: [new D.TextRun(runOpts({
+            text: "出力日時 " + stamp + "　／　総冊数 " + list.length + " 冊" +
+                  (scopeLabel ? "（" + scopeLabel + "）" : ""),
+            size: 16, color: "555555",
+          }))],
+        }),
+        table,
+      ],
+    }],
+  });
+}
+
+async function exportDocx() {
+  if (!books.length) {
+    await dialog("出力できません", "まだ1冊も登録されていません。",
+      [{ label: "閉じる", value: null, kind: "primary" }]);
+    return;
+  }
+
+  // 仕様どおり、絞り込み結果だけか全件かを出力前に選ばせる
+  let list, scopeLabel = "";
+  if (isFiltered()) {
+    const filtered = visibleBooks();
+    const choice = await dialog("どちらを出力しますか",
+      "絞り込み: 「" + qEl.value.trim() + "」",
+      [
+        { label: "絞り込み結果だけ（" + filtered.length + " 冊）", value: "filtered", kind: "primary" },
+        { label: "全件（" + books.length + " 冊）", value: "all" },
+        { label: "やめる", value: null, kind: "ghost" },
+      ]);
+    if (!choice) return;
+    if (choice === "filtered") {
+      list = filtered;
+      scopeLabel = "絞り込み: " + qEl.value.trim();
+    } else {
+      list = sortBooks(books.slice());
+    }
+  } else {
+    const ok = await dialog("Word 目録を出力します",
+      "全 " + books.length + " 冊を " + sortSel.options[sortSel.selectedIndex].text + " 順で出力します。",
+      [{ label: "出力する", value: true, kind: "primary" }, { label: "やめる", value: false, kind: "ghost" }]);
+    if (!ok) return;
+    list = visibleBooks();
+  }
+
+  const btn = $("docxBtn");
+  const before = btn.textContent;
+  btn.textContent = "生成中…";
+  btn.disabled = true;
+  try {
+    const D = await loadDocx();
+    const doc = buildDocument(D, list, scopeLabel);
+    const blob = await D.Packer.toBlob(doc);
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, "0");
+    saveBlob(blob, "蔵書目録-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
+                   "-" + p(d.getHours()) + p(d.getMinutes()) + ".docx");
+  } catch (e) {
+    showError("Word の生成に失敗しました", (e && (e.stack || e.message)) || String(e));
+  } finally {
+    btn.textContent = before;
+    btn.disabled = false;
+  }
+}
+
+/** Blob をダウンロードとして保存させる（共有シート対応はフェーズ5） */
+function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
 // =============================================================
@@ -1374,15 +1591,8 @@ function exportJson() {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const d = new Date();
   const p = (n) => String(n).padStart(2, "0");
-  const name = "bookshelf-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
-               "-" + p(d.getHours()) + p(d.getMinutes()) + ".json";
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = name;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  saveBlob(blob, "bookshelf-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
+                 "-" + p(d.getHours()) + p(d.getMinutes()) + ".json");
 
   try {
     localStorage.setItem(LS_BACKUP, JSON.stringify({ at: new Date().toISOString(), count: books.length }));
@@ -1551,6 +1761,7 @@ $("fLookup").addEventListener("click", lookupFromForm);
 qEl.addEventListener("input", render);
 sortSel.addEventListener("change", render);
 
+$("docxBtn").addEventListener("click", exportDocx);
 $("exportBtn").addEventListener("click", exportJson);
 $("importBtn").addEventListener("click", () => $("importFile").click());
 $("importFile").addEventListener("change", (ev) => {
@@ -1620,18 +1831,38 @@ async function maybeShowIntro() {
     render();
     return;
   }
+  let migrated = 0;
   try {
     const rows = await dbGetAll();
-    rows.forEach((row) => {
+    for (const row of rows) {
       const rec = Object.assign(newRecord(row.isbn13), row);
       rec._status = row.title ? "ok" : "notfound";
+      // 並列書名を別項目に分けるようにする前のデータを移行する
+      if (!rec.altTitle && rec.title && rec.title.includes(" = ")) {
+        const sp = splitTitle(rec.title);
+        rec.title = sp.title;
+        rec.altTitle = sp.altTitle;
+        if (sp.subtitle && !rec.subtitle) rec.subtitle = sp.subtitle;
+        migrated++;
+      }
       books.push(rec);
       byIsbn.set(rec.isbn13, rec);
-    });
+    }
   } catch (e) {
     showError("保存済みデータを読み出せませんでした", (e && e.message) || String(e));
   }
   render();
+
+  if (migrated) {
+    for (const rec of books) {
+      if (rec.altTitle) { try { await dbPut(rec); } catch (_) { break; } }
+    }
+    await dialog("書名を整理しました",
+      migrated + " 件の書名から、後ろに付いていた並列書名（欧文タイトルなど）を別項目に移しました。\n" +
+      "巻数が並列書名の末尾に付いていた本は、巻数だけ書名側に戻してあります。\n" +
+      "おかしくなっている本があれば、蔵書一覧から直してください。",
+      [{ label: "分かった", value: null, kind: "primary" }]);
+  }
   maybeShowIntro();
 })();
 </script>
